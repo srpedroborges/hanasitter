@@ -4,6 +4,7 @@ from threading import Timer
 import sys, time, os, subprocess
 from multiprocessing import Pool
 import shutil
+import zipfile
 #import smtplib
 #from email.mime.multipart import MIMEMultipart
 #from email.mime.text import MIMEText
@@ -104,7 +105,9 @@ def printHelp():
     print(" -vlh    virtual local host, if hanacleaner runs on a virtual host this has to be specified, default: '' (physical host is assumed)                 ")                
     print(" -k      DB user key, this one has to be maintained in hdbuserstore, i.e. as <sid>adm do                                                            ")               
     print("         > hdbuserstore SET <DB USER KEY> <ENV> <USERNAME> <PASSWORD>                     , default: SYSTEMKEY                                      ")
-    print("                                                                                                                                                    ")    
+    #ADDED#######################################################################################################################################################
+    print(" -zipd   Zips the generated logs/dumps and deletes the original txt/trc files                                                                       ")
+    #ADDED#######################################################################################################################################################
     print("                                                                                                                                                    ")
     print("EXAMPLE (if > 20 THREAD_STATE=Running, or > 30 THREAD_STATE=Semaphore Wait are found 2 RTE dumps and 3 GStacks will be recorded                     ")
     print("         in parallel, i.e. RTE1&GStack1, RTE2&GStack2, GStack3):                                                                                    ")
@@ -623,11 +626,22 @@ def record_rtedump(rtedumps_interval, hdbcons, comman):
         if host in hdbcons.hostsForRecording:
             tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
             start_time = datetime.now()
+            #ADDED#######################################################################################################################################################
+            file_name = ''
+            gen_date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            #ADDED#######################################################################################################################################################
+
             if hdbcons.rte_mode == 0: # normal rte dump
-                filename = (comman.out_dir+"/rtedump_normal_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
+            #CHANGED#######################################################################################################################################################
+                #filename = (comman.out_dir+"/rtedump_normal_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
+                filename = (comman.out_dir+"/rtedump_normal_"+host+"_"+hdbcons.SID+"_"+tenantDBString+gen_date+".trc")
+            #CHANGED#######################################################################################################################################################
                 os.system(hdbcon_string+'runtimedump dump -c" > '+filename)   # have to dump to std with -c and then to a file with >    since in case of scale-out  -f  does not work
             elif hdbcons.rte_mode == 1: # light rte dump 
-                filename = (comman.out_dir+"/rtedump_light_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
+                #CHANGED#######################################################################################################################################################
+                #filename = (comman.out_dir+"/rtedump_light_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
+                filename = (comman.out_dir+"/rtedump_light_"+host+"_"+hdbcons.SID+"_"+tenantDBString+gen_date+".trc")
+                #CHANGED#######################################################################################################################################################
                 os.system(hdbcon_string+'runtimedump dump -c -s STACK_SHORT,THREADS" > '+filename)
                 os.system(hdbcon_string+'statreg print -h -n M_JOBEXECUTORS_" >> '+filename)
                 os.system(hdbcon_string+'statreg print -h -n M_DEV_JOBEX_THREADGROUPS" >> '+filename)
@@ -638,6 +652,15 @@ def record_rtedump(rtedumps_interval, hdbcons, comman):
             stop_time = datetime.now()
             printout = "RTE Dump Record   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , True         ,   -        , "+filename   # if an [ERROR] happens that will be inside the file, hanasitter will not know it
             log(printout, comman)
+            #ADDED#######################################################################################################################################################
+            #if we want to zip the txt(s)/trc(s) generated for this session want to delete the original file(s)
+            if(zip_and_delete):
+                files_to_zip = []
+                files_to_zip.append(filename)
+                status = zip_and_delete(files_to_zip, filename[-4:])
+                printout = "Zipped contents and deleted original file(s)   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                log(printout, comman)
+            #ADDED#######################################################################################################################################################
             total_printout += printout
     time.sleep(rtedumps_interval)
     return total_printout 
@@ -802,6 +825,55 @@ def log(message, comman, file_name = "", sendEmail = False):
         mailstring = 'echo "'+message+'" | mailx -s "Message from HANASitter about '+emailNotification.SID+'" -S smtp=smtp://'+emailNotification.mailServer+' -S from="'+emailNotification.senderEmail+'" '+emailNotification.recieverEmail
         #print mailstring
         output = subprocess.check_output(mailstring, shell=True)
+
+#ADDED#######################################################################################################################################################
+def zip_and_delete(list_of_filenames, zip_filename):
+    
+    files_to_zip = []
+    zipped_file_list = []
+    for filename in list_of_filenames:
+        #make sure we only work with existing files
+        if(os.path.exists(filename)):
+            files_to_zip.append(filename)
+    #check if the zip_filename has ".zip" in the end. If not, add it
+    if not(zip_filename.lower()[-4:] == '.zip'):
+        zip_filename +='.zip'
+    #set the zip compression
+    try:
+        import zlib
+        compression = zipfile.ZIP_DEFLATED
+    except:
+        compression = zipfile.ZIP_STORED
+
+    zf = zipfile.ZipFile(zip_filename, mode='w')
+    try:
+        #add all files to a zip file
+        for file in files_to_zip:
+            zf.write(file,compress_type=compression)
+    finally:
+        zipped_file_list = zf.namelist()
+        zf.close()
+    #check if the txt/trace files were zipped successfuly. if yes, delete them from OS
+    zf = zipfile.ZipFile(zip_filename, mode='r')
+    try:
+        for file in files_to_zip:
+            #the name stored in the zipfile doesn't contain the first slash /
+            if(file[1:] in zipped_file_list):
+                if(os.path.exists(file)):
+                    os.system('rm {0}'.format(file))
+    except:
+        print('ZipFile: Error in delete file procedure')
+
+    zf.close()
+    #os.system('zip -9 {0} {1}'.format(zip_filename, " ".join(files_to_zip))
+    #        os.system('zip -9 {0} {1}'.format(zip_filename, filename))
+    #        #check if the zip file was created
+    #        if(os.path.exists(zip_filename)):
+    #            os.system('rm {0}'.format(filename))
+    #            return True
+    #return False
+#ADDED#######################################################################################################################################################
+
     
 def main():
     #####################  CHECK PYTHON VERSION ###########
@@ -847,7 +919,10 @@ def main():
                             #     ENV : mo-fc8d991e0:30015
                             #     USER: SYSTEM
     cpu_check_params = ['0', '0','0','100'] # by default no cpu check
-    
+    #ADDED#######################################################################################################################################################
+    zip_and_delete = False
+    #ADDED#######################################################################################################################################################
+
     #####################  CHECK INPUT ARGUMENTS #################
     if len(sys.argv) == 1:
         print "INPUT ERROR: hanasitter needs input arguments. Please see --help for more information."
@@ -939,7 +1014,11 @@ def main():
                         dbuserkey = flagValue
                     if firstWord == '-cpu': 
                         cpu_check_params = [x for x in flagValue.split(',')]
-     
+    #ADDED#######################################################################################################################################################
+                    if firstWord == '-zipd': 
+                        zip_and_delete = flagValue
+    #ADDED#######################################################################################################################################################
+
     #####################   INPUT ARGUMENTS (these would overwrite whats in the configuration file)  ####################     
     if '-oi' in sys.argv:
         online_test_interval = sys.argv[sys.argv.index('-oi') + 1]
@@ -1005,7 +1084,11 @@ def main():
         dbuserkey = sys.argv[sys.argv.index('-k') + 1]
     if '-cpu' in sys.argv:
         cpu_check_params = [x for x in sys.argv[  sys.argv.index('-cpu') + 1   ].split(',')]    
-     
+    #ADDED#######################################################################################################################################################
+    if 'zipd' in sys.argv:
+        zip_and_delete = True
+    #ADDED#######################################################################################################################################################
+ 
     ############ GET LOCAL HOST, LOCAL SQL PORT, LOCAL INSTANCE and SID ##########
     local_host = subprocess.check_output("hostname", shell=True).replace('\n','') if virtual_local_host == "" else virtual_local_host
     key_environment = subprocess.check_output('''hdbuserstore LIST '''+dbuserkey, shell=True) 
