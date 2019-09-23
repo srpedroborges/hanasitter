@@ -184,10 +184,10 @@ emailNotification = None
 
 ######################## DEFINE CLASSES ##################################
 class RTESetting:
-    def __init__(self, num_rtedumps, rtedumps_interval, zip_and_delete_trace):
+    def __init__(self, num_rtedumps, rtedumps_interval, zip_file_mode):
         self.num_rtedumps = num_rtedumps
         self.rtedumps_interval = rtedumps_interval
-        self.zip_and_delete_trace = zip_and_delete_trace
+        self.zip_file_mode = zip_file_mode
         
 class CallStackSetting:
     def __init__(self, num_callstacks, callstacks_interval):
@@ -659,11 +659,12 @@ def record_rtedump(rte, hdbcons, comman):
             log(printout, comman)
             #ADDED#######################################################################################################################################################
             #if we want to zip the txt(s)/trc(s) generated for this session want to delete the original file(s)
-            if not (rte.zip_and_delete_trace == 'n') :
+            if not (rte.zip_file_mode == 'n') :
                 files_to_zip = []
                 files_to_zip.append(filename)
-                zip_files(files_to_zip, filename[:-4],rte.zip_and_delete_trace) # filename[:-4] -> removes the.trc
-                printout = "Zipped contents" + (" and deleted original file(s) " if rte.zip_and_delete_trace == 'd' else " ") +  ", " +datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                zip_filename = (comman.out_dir+"/"+host+"_"+hdbcons.SID+"_"+tenantDBString+gen_date+".zip")
+                zip_files(files_to_zip, zip_filename, rte.zip_file_mode)
+                printout = "Zipped contents" + (" and deleted original file(s) " if rte.zip_file_mode == 'd' else " ") +  ", " +datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 log(printout, comman)
             #ADDED#######################################################################################################################################################
             total_printout += printout
@@ -843,7 +844,7 @@ def zip_files(list_of_filenames, zip_filename, mode):
     if not(zip_filename.lower()[-4:] == '.zip'):
         zip_filename +='.zip'
 
-    print('Debug: Zipfilename -> ' + zip_filename)
+    #print('Debug: Zipfilename -> ' + zip_filename)
     #set the zip compression
     try:
         import zlib
@@ -926,7 +927,7 @@ def main():
                             #     USER: SYSTEM
     cpu_check_params = ['0', '0','0','100'] # by default no cpu check
     #ADDED#######################################################################################################################################################
-    zip_and_delete_trace = 'n'
+    zip_file_mode = 'n'
     #ADDED#######################################################################################################################################################
 
     #####################  CHECK INPUT ARGUMENTS #################
@@ -1022,7 +1023,7 @@ def main():
                         cpu_check_params = [x for x in flagValue.split(',')]
     #ADDED#######################################################################################################################################################
                     if firstWord == '-zip': 
-                        zip_and_delete_trace = flagValue
+                        zip_file_mode = flagValue
     #ADDED#######################################################################################################################################################
 
     #####################   INPUT ARGUMENTS (these would overwrite whats in the configuration file)  ####################     
@@ -1092,7 +1093,7 @@ def main():
         cpu_check_params = [x for x in sys.argv[  sys.argv.index('-cpu') + 1   ].split(',')]    
     #ADDED#######################################################################################################################################################
     if '-zip' in sys.argv:
-        zip_and_delete_trace = 'd'
+        zip_file_mode = 'd'
     #ADDED#######################################################################################################################################################
  
     ############ GET LOCAL HOST, LOCAL SQL PORT, LOCAL INSTANCE and SID ##########
@@ -1450,7 +1451,7 @@ def main():
         log("After Recording: Sleep "+str(after_recorded)+" seconds", comman)
     log(" - - - - - Start HANASitter - - - - - - ", comman)
     log("Action            , Timestamp              , Duration         , Successful   , Result     , Comment ", comman)
-    rte = RTESetting(num_rtedumps, rtedumps_interval, zip_and_delete_trace)
+    rte = RTESetting(num_rtedumps, rtedumps_interval, zip_file_mode)
     callstack = CallStackSetting(num_callstacks, callstacks_interval)
     gstack = GStackSetting(num_gstacks, gstacks_interval)
     kprofiler = KernelProfileSetting(num_kprofs, kprofs_interval, kprofs_duration, kprofs_wait)
