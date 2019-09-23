@@ -106,7 +106,11 @@ def printHelp():
     print(" -k      DB user key, this one has to be maintained in hdbuserstore, i.e. as <sid>adm do                                                            ")               
     print("         > hdbuserstore SET <DB USER KEY> <ENV> <USERNAME> <PASSWORD>                     , default: SYSTEMKEY                                      ")
     #ADDED#######################################################################################################################################################
-    print(" -zipd   Zips the generated logs/dumps and deletes the original txt/trc files                                                                       ")
+    print(" -zip    Zips the generated logs/dumps with the option to delete the original txt/trc file(s)                                                         ")
+    print("         modes: [n y d]                                                                                                                             ")
+    print("         n -> disabled                                                                                                                              ")
+    print("         y -> enabled                                                                                                                               ")
+    print("         d -> enabled with delete original trace                                                                                                    ")
     #ADDED#######################################################################################################################################################
     print("                                                                                                                                                    ")
     print("EXAMPLE (if > 20 THREAD_STATE=Running, or > 30 THREAD_STATE=Semaphore Wait are found 2 RTE dumps and 3 GStacks will be recorded                     ")
@@ -180,9 +184,10 @@ emailNotification = None
 
 ######################## DEFINE CLASSES ##################################
 class RTESetting:
-    def __init__(self, num_rtedumps, rtedumps_interval):
+    def __init__(self, num_rtedumps, rtedumps_interval, zip_and_delete_trace):
         self.num_rtedumps = num_rtedumps
         self.rtedumps_interval = rtedumps_interval
+        self.zip_and_delete_trace = zip_and_delete_trace
         
 class CallStackSetting:
     def __init__(self, num_callstacks, callstacks_interval):
@@ -620,7 +625,7 @@ def record_callstack(callstacks_interval, hdbcons, comman):
     time.sleep(callstacks_interval)
     return total_printout 
  
-def record_rtedump(rtedumps_interval, hdbcons, comman):
+def record_rtedump(rte, hdbcons, comman):
     total_printout = ""
     for hdbcon_string, host in zip(hdbcons.hdbcons_strings, hdbcons.hosts):
         if host in hdbcons.hostsForRecording:
@@ -654,15 +659,15 @@ def record_rtedump(rtedumps_interval, hdbcons, comman):
             log(printout, comman)
             #ADDED#######################################################################################################################################################
             #if we want to zip the txt(s)/trc(s) generated for this session want to delete the original file(s)
-            if(zip_and_delete):
+            if not (rte.zip_and_delete_trace == 'n') :
                 files_to_zip = []
                 files_to_zip.append(filename)
-                status = zip_and_delete(files_to_zip, filename[-4:])
-                printout = "Zipped contents and deleted original file(s)   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                zip_files(files_to_zip, filename[:-4],rte.zip_and_delete_trace) # filename[:-4] -> removes the.trc
+                printout = "Zipped contents" + (" and deleted original file(s) " if rte.zip_and_delete_trace == 'd' else " ") +  ", " +datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 log(printout, comman)
             #ADDED#######################################################################################################################################################
             total_printout += printout
-    time.sleep(rtedumps_interval)
+    time.sleep(rte.rtedumps_interval)
     return total_printout 
  
 def record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman):
@@ -670,7 +675,7 @@ def record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hd
         for p in recording_prio:
             if p == 1:
                 for i in range(rte.num_rtedumps):
-                    record_rtedump(rte.rtedumps_interval, hdbcons, comman)
+                    record_rtedump(rte, hdbcons, comman)
             if p == 2:
                 for i in range(callstack.num_callstacks):
                     record_callstack(callstack.callstacks_interval, hdbcons, comman) 
@@ -686,7 +691,7 @@ def record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hd
             for p in recording_prio:
                 if p == 1:
                     if i < rte.num_rtedumps:
-                        record_rtedump(rte.rtedumps_interval, hdbcons, comman)
+                        record_rtedump(rte, hdbcons, comman)
                 if p == 2:
                     if i < callstack.num_callstacks:
                         record_callstack(callstack.callstacks_interval, hdbcons, comman)
@@ -726,7 +731,7 @@ def parallel_recording_wrapper(rec_types):
 
 def parallel_recording(record_type, recorder, hdbcons, comman):
     if record_type == 1:
-        return record_rtedump(recorder.rtedumps_interval, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features))
+        return record_rtedump(recorder, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features))
     elif record_type == 2:
         return record_callstack(recorder.callstacks_interval, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features))
     elif record_type == 3:
@@ -827,8 +832,7 @@ def log(message, comman, file_name = "", sendEmail = False):
         output = subprocess.check_output(mailstring, shell=True)
 
 #ADDED#######################################################################################################################################################
-def zip_and_delete(list_of_filenames, zip_filename):
-    
+def zip_files(list_of_filenames, zip_filename, mode):
     files_to_zip = []
     zipped_file_list = []
     for filename in list_of_filenames:
@@ -838,6 +842,8 @@ def zip_and_delete(list_of_filenames, zip_filename):
     #check if the zip_filename has ".zip" in the end. If not, add it
     if not(zip_filename.lower()[-4:] == '.zip'):
         zip_filename +='.zip'
+
+    print('Debug: Zipfilename -> ' + zip_filename)
     #set the zip compression
     try:
         import zlib
@@ -858,7 +864,7 @@ def zip_and_delete(list_of_filenames, zip_filename):
     try:
         for file in files_to_zip:
             #the name stored in the zipfile doesn't contain the first slash /
-            if(file[1:] in zipped_file_list):
+            if(file[1:] in zipped_file_list and mode == 'd'):
                 if(os.path.exists(file)):
                     os.system('rm {0}'.format(file))
     except:
@@ -920,7 +926,7 @@ def main():
                             #     USER: SYSTEM
     cpu_check_params = ['0', '0','0','100'] # by default no cpu check
     #ADDED#######################################################################################################################################################
-    zip_and_delete = False
+    zip_and_delete_trace = 'n'
     #ADDED#######################################################################################################################################################
 
     #####################  CHECK INPUT ARGUMENTS #################
@@ -1015,8 +1021,8 @@ def main():
                     if firstWord == '-cpu': 
                         cpu_check_params = [x for x in flagValue.split(',')]
     #ADDED#######################################################################################################################################################
-                    if firstWord == '-zipd': 
-                        zip_and_delete = flagValue
+                    if firstWord == '-zip': 
+                        zip_and_delete_trace = flagValue
     #ADDED#######################################################################################################################################################
 
     #####################   INPUT ARGUMENTS (these would overwrite whats in the configuration file)  ####################     
@@ -1085,8 +1091,8 @@ def main():
     if '-cpu' in sys.argv:
         cpu_check_params = [x for x in sys.argv[  sys.argv.index('-cpu') + 1   ].split(',')]    
     #ADDED#######################################################################################################################################################
-    if 'zipd' in sys.argv:
-        zip_and_delete = True
+    if '-zip' in sys.argv:
+        zip_and_delete_trace = 'd'
     #ADDED#######################################################################################################################################################
  
     ############ GET LOCAL HOST, LOCAL SQL PORT, LOCAL INSTANCE and SID ##########
@@ -1444,7 +1450,7 @@ def main():
         log("After Recording: Sleep "+str(after_recorded)+" seconds", comman)
     log(" - - - - - Start HANASitter - - - - - - ", comman)
     log("Action            , Timestamp              , Duration         , Successful   , Result     , Comment ", comman)
-    rte = RTESetting(num_rtedumps, rtedumps_interval)
+    rte = RTESetting(num_rtedumps, rtedumps_interval, zip_and_delete_trace)
     callstack = CallStackSetting(num_callstacks, callstacks_interval)
     gstack = GStackSetting(num_gstacks, gstacks_interval)
     kprofiler = KernelProfileSetting(num_kprofs, kprofs_interval, kprofs_duration, kprofs_wait)
