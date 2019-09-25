@@ -872,13 +872,6 @@ def zip_files(list_of_filenames, zip_filename, mode):
         print('ZipFile: Error in delete file procedure')
 
     zf.close()
-    #os.system('zip -9 {0} {1}'.format(zip_filename, " ".join(files_to_zip))
-    #        os.system('zip -9 {0} {1}'.format(zip_filename, filename))
-    #        #check if the zip file was created
-    #        if(os.path.exists(zip_filename)):
-    #            os.system('rm {0}'.format(filename))
-    #            return True
-    #return False
 #ADDED#######################################################################################################################################################
 
     
@@ -928,6 +921,8 @@ def main():
     cpu_check_params = ['0', '0','0','100'] # by default no cpu check
     #ADDED#######################################################################################################################################################
     zip_file_mode = 'n'
+    external_binaries_java_bin_location = ''
+    external_binaries_hanadumpanalyzer_location = ''
     #ADDED#######################################################################################################################################################
 
     #####################  CHECK INPUT ARGUMENTS #################
@@ -1093,7 +1088,7 @@ def main():
         cpu_check_params = [x for x in sys.argv[  sys.argv.index('-cpu') + 1   ].split(',')]    
     #ADDED#######################################################################################################################################################
     if '-zip' in sys.argv:
-        zip_file_mode = 'd'
+        zip_file_mode = sys.argv[sys.argv.index('-zip') + 1]
     #ADDED#######################################################################################################################################################
  
     ############ GET LOCAL HOST, LOCAL SQL PORT, LOCAL INSTANCE and SID ##########
