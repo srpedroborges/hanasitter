@@ -5,6 +5,7 @@ import sys, time, os, subprocess
 from multiprocessing import Pool
 import shutil
 import zipfile
+from time import tzname
 #import smtplib
 #from email.mime.multipart import MIMEMultipart
 #from email.mime.text import MIMEText
@@ -631,40 +632,32 @@ def record_rtedump(rte, hdbcons, comman):
         if host in hdbcons.hostsForRecording:
             tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
             start_time = datetime.now()
-            #ADDED#######################################################################################################################################################
-            file_name = ''
             gen_date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            #ADDED#######################################################################################################################################################
-
+            get_timezone = str(time.tzname[0])
+            filename = "{0}_{1}_{2}_{3}{4}{5}".format("rtedump_normal" if hdbcons.rte_mode == 0 else "rtedump_light", host, hdbcons.SID, tenantDBString, gen_date, get_timezone)
+            full_path_filename = "{0}/{1}.trc".format(comman.out_dir, filename)
             if hdbcons.rte_mode == 0: # normal rte dump
-            #CHANGED#######################################################################################################################################################
-                #filename = (comman.out_dir+"/rtedump_normal_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
-                filename = (comman.out_dir+"/rtedump_normal_"+host+"_"+hdbcons.SID+"_"+tenantDBString+gen_date+".trc")
-            #CHANGED#######################################################################################################################################################
-                os.system(hdbcon_string+'runtimedump dump -c" > '+filename)   # have to dump to std with -c and then to a file with >    since in case of scale-out  -f  does not work
+                   os.system(hdbcon_string+'runtimedump dump -c" > '+full_path_filename)   # have to dump to std with -c and then to a file with >    since in case of scale-out  -f  does not work
             elif hdbcons.rte_mode == 1: # light rte dump 
-                #CHANGED#######################################################################################################################################################
-                #filename = (comman.out_dir+"/rtedump_light_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
-                filename = (comman.out_dir+"/rtedump_light_"+host+"_"+hdbcons.SID+"_"+tenantDBString+gen_date+".trc")
-                #CHANGED#######################################################################################################################################################
-                os.system(hdbcon_string+'runtimedump dump -c -s STACK_SHORT,THREADS" > '+filename)
-                os.system(hdbcon_string+'statreg print -h -n M_JOBEXECUTORS_" >> '+filename)
-                os.system(hdbcon_string+'statreg print -h -n M_DEV_JOBEX_THREADGROUPS" >> '+filename)
-                os.system(hdbcon_string+'statreg print -h -n M_DEV_JOBEXWAITING" >> '+filename)
-                os.system(hdbcon_string+'statreg print -h -n M_DEV_CONTEXTS" >> '+filename)
-                os.system(hdbcon_string+'statreg print -h -n M_CONNECTIONS" >> '+filename)
-                os.system(hdbcon_string+'statreg print -h -n M_DEV_SESSION_PARTITIONS" >> '+filename)
+                os.system(hdbcon_string+'runtimedump dump -c -s STACK_SHORT,THREADS" > '+full_path_filename)
+                os.system(hdbcon_string+'statreg print -h -n M_JOBEXECUTORS_" >> '+full_path_filename)
+                os.system(hdbcon_string+'statreg print -h -n M_DEV_JOBEX_THREADGROUPS" >> '+full_path_filename)
+                os.system(hdbcon_string+'statreg print -h -n M_DEV_JOBEXWAITING" >> '+full_path_filename)
+                os.system(hdbcon_string+'statreg print -h -n M_DEV_CONTEXTS" >> '+full_path_filename)
+                os.system(hdbcon_string+'statreg print -h -n M_CONNECTIONS" >> '+full_path_filename)
+                os.system(hdbcon_string+'statreg print -h -n M_DEV_SESSION_PARTITIONS" >> '+full_path_filename)
             stop_time = datetime.now()
-            printout = "RTE Dump Record   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , True         ,   -        , "+filename   # if an [ERROR] happens that will be inside the file, hanasitter will not know it
+            printout = "RTE Dump Record   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , True         ,   -        , "+full_path_filename   # if an [ERROR] happens that will be inside the file, hanasitter will not know it
             log(printout, comman)
             #ADDED#######################################################################################################################################################
             #if we want to zip the txt(s)/trc(s) generated for this session want to delete the original file(s)
             if not (rte.zip_file_mode == 'n') :
                 files_to_zip = []
-                files_to_zip.append(filename)
-                zip_filename = (comman.out_dir+"/"+host+"_"+hdbcons.SID+"_"+tenantDBString+gen_date+".zip")
+                files_to_zip.append(full_path_filename)
+                zip_filename = "{0}/{1}_{2}_{3}{4}{5}.zip".format(comman.out_dir, host, hdbcons.SID, tenantDBString, gen_date, get_timezone)
+                #print('Zip Name:' +zip_filename)
                 zip_files(files_to_zip, zip_filename, rte.zip_file_mode)
-                printout = "Zipped contents" + (" and deleted original file(s) " if rte.zip_file_mode == 'd' else " ") +  ", " +datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                printout = "Zipped contents" + (" and deleted original file(s) " if rte.zip_file_mode == 'd' else " ") +  ", " +datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ", File location: " + zip_filename
                 log(printout, comman)
             #ADDED#######################################################################################################################################################
             total_printout += printout
