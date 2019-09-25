@@ -185,10 +185,12 @@ emailNotification = None
 
 ######################## DEFINE CLASSES ##################################
 class RTESetting:
-    def __init__(self, num_rtedumps, rtedumps_interval, zip_file_mode):
+    def __init__(self, num_rtedumps, rtedumps_interval, zip_file_mode, java_executable_path, hanadumpanalyzer_executable_path):
         self.num_rtedumps = num_rtedumps
         self.rtedumps_interval = rtedumps_interval
         self.zip_file_mode = zip_file_mode
+        self.java_executable_path = java_executable_path
+        self.hanadumpanalyzer_executable_path = hanadumpanalyzer_executable_path
         
 class CallStackSetting:
     def __init__(self, num_callstacks, callstacks_interval):
@@ -650,10 +652,17 @@ def record_rtedump(rte, hdbcons, comman):
             printout = "RTE Dump Record   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , True         ,   -        , "+full_path_filename   # if an [ERROR] happens that will be inside the file, hanasitter will not know it
             log(printout, comman)
             #ADDED#######################################################################################################################################################
+            #Process HANADump_Analyzer if enabled
+            hanadump_analysis_file = process_hanadump_analyzer(rte.java_executable_path, rte.hanadumpanalyzer_executable_path, full_path_filename)
+            print('HANA ANALYZER: The analysis is here: ' + hanadump_analysis_file)
+
+            #ADDED#######################################################################################################################################################
             #if we want to zip the txt(s)/trc(s) generated for this session want to delete the original file(s)
             if not (rte.zip_file_mode == 'n') :
                 files_to_zip = []
                 files_to_zip.append(full_path_filename)
+                if not (hanadump_analysis_file == ""):
+                    files_to_zip.append(hanadump_analysis_file)
                 zip_filename = "{0}/{1}_{2}_{3}{4}{5}.zip".format(comman.out_dir, host, hdbcons.SID, tenantDBString, gen_date, get_timezone)
                 #print('Zip Name:' +zip_filename)
                 zip_files(files_to_zip, zip_filename, rte.zip_file_mode)
@@ -837,7 +846,6 @@ def zip_files(list_of_filenames, zip_filename, mode):
     if not(zip_filename.lower()[-4:] == '.zip'):
         zip_filename +='.zip'
 
-    #print('Debug: Zipfilename -> ' + zip_filename)
     #set the zip compression
     try:
         import zlib
@@ -850,6 +858,8 @@ def zip_files(list_of_filenames, zip_filename, mode):
         #add all files to a zip file
         for file in files_to_zip:
             zf.write(file,compress_type=compression)
+    except Exception, e:
+        print('ZipFile: Error in creation procedure' + str(e))
     finally:
         zipped_file_list = zf.namelist()
         zf.close()
@@ -858,13 +868,50 @@ def zip_files(list_of_filenames, zip_filename, mode):
     try:
         for file in files_to_zip:
             #the name stored in the zipfile doesn't contain the first slash /
-            if(file[1:] in zipped_file_list and mode == 'd'):
-                if(os.path.exists(file)):
-                    os.system('rm {0}'.format(file))
-    except:
-        print('ZipFile: Error in delete file procedure')
+            if(file[1:] in zipped_file_list and mode == 'd'):  
+                #get the full path to the directory where the file is saved
+                file_directory = file.rsplit('/',1)[0]
+                #if we are treating a HANADump file, we also need to delete the directory created with the name of the trace.
+                if("HANADumpAnalyzer" in file_directory):
+                    os.system('rm -rf {0}'.format(file_directory))
+                elif(os.path.exists(file)):
+                    os.system('rm {0}'.format(file))                          
+    except Exception, e:
+        print('ZipFile: Error in delete file procedure' + str(e))
 
     zf.close()
+
+
+def process_hanadump_analyzer(java_path, hanadump_analyzer_path, trace_file_path):
+
+        #validate that all the paths are valid
+        if not (os.path.exists(java_path)):
+            print('HANADUMP_Analyzer error: Java path is invalid! Current value: ' + java_path)
+            return ""
+        if not (os.path.exists(hanadump_analyzer_path)):
+            print('HANADUMP_Analyzer error: Hanadump_Analyzer path is invalid! Current value: ' + hanadump_analyzer_path)
+            return ""
+        if not (os.path.exists(trace_file_path)):
+            print('HANADUMP_Analyzer error: Invalid trace file! Current value: ' + trace_file_path)
+            return ""
+
+        print('HANADUMP_Analyzer . all checks passed')
+
+
+        target_output_directory = trace_file_path.rsplit('/',1)[0] # get everything until the last "/" character
+        runtimedump_file_name = trace_file_path.rsplit('/',1)[1][:-4] # get the trace name without the .trc
+        command_string = "{0} -jar {1} -s {2} -d {3}".format(java_path, hanadump_analyzer_path, trace_file_path,target_output_directory)
+        try:
+                output = subprocess.check_output(command_string, shell=True)
+        except Exception, e:
+                print('HANADUMP_Analyzer error: Exception found - ' + str(e))
+        print('HANADUMP_Analyzer executed successfuly!')
+
+        analysis_path = "{0}/HANADumpAnalyzer/{1}/analysis.html".format(target_output_directory, runtimedump_file_name)
+
+        return analysis_path
+
+
 #ADDED#######################################################################################################################################################
 
     
@@ -914,8 +961,8 @@ def main():
     cpu_check_params = ['0', '0','0','100'] # by default no cpu check
     #ADDED#######################################################################################################################################################
     zip_file_mode = 'n'
-    external_binaries_java_bin_location = ''
-    external_binaries_hanadumpanalyzer_location = ''
+    java_executable_path = ''
+    hanadumpanalyzer_executable_path = ''
     #ADDED#######################################################################################################################################################
 
     #####################  CHECK INPUT ARGUMENTS #################
@@ -1439,7 +1486,7 @@ def main():
         log("After Recording: Sleep "+str(after_recorded)+" seconds", comman)
     log(" - - - - - Start HANASitter - - - - - - ", comman)
     log("Action            , Timestamp              , Duration         , Successful   , Result     , Comment ", comman)
-    rte = RTESetting(num_rtedumps, rtedumps_interval, zip_file_mode)
+    rte = RTESetting(num_rtedumps, rtedumps_interval, zip_file_mode, java_executable_path, hanadumpanalyzer_executable_path)
     callstack = CallStackSetting(num_callstacks, callstacks_interval)
     gstack = GStackSetting(num_gstacks, gstacks_interval)
     kprofiler = KernelProfileSetting(num_kprofs, kprofs_interval, kprofs_duration, kprofs_wait)
