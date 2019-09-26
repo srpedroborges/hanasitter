@@ -31,87 +31,92 @@ def printHelp():
     print(""" - /bin/bash has to return "clean" outputs, e.g.  /bin/bash -i -c "alias cdhdb"  should ONLY return something like  alias cdhdb='cd $DIR_INSTANCE'  """)
     print("                                                                                                                                                    ")
     print("INPUT ARGUMENTS:                                                                                                                                    ")
-    print("         *** CHECKS (Pings and/or Feature Checks and/or CPU Checks) ***                                                                             ")
-    print(" -oi     online test interval [seconds], time it waits before it checks if DB is online again, default: 3600 seconds                                ")
-    print(" -cpu    a 4 items list to control the cpu check: cpu type, number checks, interval, max average CPU in %, default: 0,0,0,100                       ")
-    print("         Possible cpu types are: 0 = not used, 1 = user cpu, 2 = system cpu                                                                         ")
-    print(" -pt     ping timeout [seconds], time it waits before the DB is considered unresponsive, default: 60 seconds                                        ")           
-    print(' -cf     list of features surrounded by two "s; the -cf flag has two modes, 1. One Column Mode and 2. Where Clause Mode                             ')
-    print("         1. One Column Mode: any sys.m_* view, a column in that view, the column value (wildcards, *, before and/or after are possible) and         ")
-    print("            max number allowed feature occations, i.e.                                                                                              ")
-    print('            "<m_view 1>,<feature 1>,<[*]value 1[*]>,<limit 1>,...,<m_view N>,<feature N>,<[*]value N[*]>,<limit N>"                                 ')
-    print("         2. Where Clause Mode: any sys.m_* view, the keyword 'WHERE', the where clause and max number allowed feature occations, i.e.               ")
-    print('            "<m_view 1>,WHERE,<where clause 1>,<limit 1>,...,<m_view N>,WHERE,<where clause N>,<limit N>"                                           ')
-    print('         default: ""                                                                                                                                ')
-    print('         Note: <limit> should be an integer, or an integer preceded by < (for maximum allowed) or > (for minumum allowed)                           ')
-    print('         Note: If you need a , in critical feature, please use \c instead, e.g. add_seconds(BLOCKED_TIME\c600)                                      ')
-    print(" -if     number checks and intervals of checks, every odd item of this list specifies how many times each feature check (see -cf) should be executed")
-    print("         and every even item specifies how many seconds it waits between each check, then the <max numbers X> in the -cf flag is the maximum        ")
-    print("         allowed average value, e.g. <number checks 1>,<interval [s] 1>,...,<number checks N>,<interval [s] N>, default: [] (not used)              ")
-    print(" -tf     feature check time out [seconds], time it waits before the DB is considered unresponsive during a feature check                            ")
-    print("         (see -cf), if -if is used this time out will be added to the interval and then multiplied with number checks, default: 60 seconds          ") 
-    print(" -lf     log features [true/false], logging ALL information of ALL critical features (beware: could be costly!), default: false                     ")
-    print(" -ci     check interval [seconds], time it waits before it checks cpu, pings and check features again, default: 60 seconds                          ") 
-    print(" -ar     time to sleep after recording [seconds], if negative it exits, default: -1                                                                 ")
-    print("         *** RECORDINGS (GStacks and/or Kernel Profiler Traces and/or Call Stacks and/or RTE dumps) ***                                             ")
-    print(" -rm     recording mode [1, 2 or 3], 1 = each requested recording types are done one after each other with the order above,                         ")
-    print("                                         e.g. GStack 1, GStack 2, ..., GStack N, RTE 1, RTE 2, ..., RTE N   (this is default)                       ")
-    print("                                     2 = the recordings of each requested recording types are done after each other with the                        ")
-    print("                                         order above, e.g. GStack 1, RTE 1, Gstack 2, RTE 2, ...                                                    ")
-    print("                                     3 = different recording types recorded in parallel threads, e.g. if 2 GStacks and 1 RTE                        ")
-    print("                                         requested then GStack 1 and RTE 1 are parallel done, when both done GStack 2 starts                        ")
-    print(" -rp     recording priorities [list of 4 integers [1,4]] defines what order the recording modes will be executed for rm = 1 and rm = 2              ")
-    print("                                                         # 1 = RTE, # 2 = CallStacks, # 3 = GStacks, # 4 = Kernel Profiler, default: 1,2,3,4        ")
-    print(" -hm     host mode [true/false], if true then all critical features are considered per host and the recording is done only for those hosts where    ")
-    print("                                 the critical feature is above allowed limit per host, default: false                                               ")
-    print("                                 Note: -hm is not supported for gstack (-ng), but for the other recording possibilities (-np, -nc, and -nr)         ")
-    print(" -ng     number indexserver gstacks created if the DB is considered unresponsive (Note: gstack blocks the indexserver! See SAP Note 2000000         ")
-    print('         "Call stack generation via gstack"), default: 0  (not used)                                                                                ') 
-    print(" -ig     gstacks interval [seconds], for -rm = 1: time it waits between each gstack,                                                                ")
-    print("                                     for -rm = 2: time it waits after a gstack,                                                                     ")
-    print("                                     for -rm = 3: time the thread waits after a gstack,          default: 60 seconds                                ")
-    print(" -np     number indexserver kernel profiler traces created if the DB is considered unresponsive: default: 0  (not used)                             ") 
-    print(" -dp     profiler duration [seconds], how long time it is tracing, default: 60 seconds   (more info: SAP Note 1804811)                              ")
-    print(" -wp     profiler wait time [milliseconds], wait time after callstacks of all running threads have been taken, default 0                            ")
-    print(" -ip     profiler interval [seconds], for -rm = 1: time it waits between each profiler trace,                                                       ")
-    print("                                      for -rm = 2: time it waits after a profiler trace,                                                            ")
-    print("                                      for -rm = 3: time the thread waits after a profiler trace,         default: 60 seconds                        ")
-    print(" -nc     number call stacks created if the DB is considered unresponsive: default: 0  (not used)                                                    ") 
-    print(" -ic     call stacks interval [seconds], for -rm = 1: time it waits between each call stack,                                                        ")
-    print("                                         for -rm = 2: time it waits after a call stack,                                                             ")
-    print("                                         for -rm = 3: time the thread waits after a call stack,  default: 60 seconds                                ")
-    print(" -nr     number rte dumps created if the DB is considered unresponsive: default: 0    (not used)                                                    ") 
-    print("         Note: output is restricted to these folders /tmp, $HOME, $DIR_INSTANCE/work, and $SAP_RETRIEVAL_PATH                                       ")
-    print(" -ir     rte dumps interval [seconds], for -rm = 1: time it waits between each rte dump,                                                            ")
-    print("                                       for -rm = 2: time it waits after an rte dump,                                                                ")
-    print("                                       for -rm = 3: time the thread waits after an rte dump,     default: 60 seconds                                ")
-    print(" -mr     rte dump mode [0 or 1], -mr = 0: normal rte dump,                                                                                          ")
-    print("                                 -mr = 1: light rte dump mode, only rte dump with STACK_SHORT and THREADS sections, and some M_ views,  default: 0  ")
-    print("         *** KILL SESSIONS (use with care!) ***                                                                                                     ")
-    print(" -ks     kill session [list of true/false], list of booleans (length must be the same as number of features defined by -cf) that defines if -cf's   ")
-    print("         features could indicate that the sessions (connections) are tried to be disconnected or not, default: None (not used)                      ")
-    print("         Note: Requires SESSION ADMIN                                                                                                               ")
-    print("         *** ADMINS (Output Directory, Logging, Output and DB User) ***                                                                             ")
-    print(" -od     output directory, full path of the folder where all output files will end up (if the folder does not exist it will be created),            ")
-    print("         default: '/tmp/hanasitter_output'                                                                                                          ")
-    print(" -or     output log retention days, hanasitterlogs in the path specified with -od are only saved for this number of days, default: -1 (not used)    ")
-    print(" -en     email notification, <sender's email>,<reciever's email>,<mail server>, default:     (not used)                                             ") 
-    print("                             example: me@ourcompany.com,you@ourcompany.com,smtp.intra.ourcompany.com                                                ")
-    print('         NOTE: For this to work you have to install the linux program "sendmail" and add a line similar to DSsmtp.intra.ourcompany.com in the file  ')
-    print("               sendmail.cf in /etc/mail/, see https://www.systutorials.com/5167/sending-email-using-mailx-in-linux-through-internal-smtp/           ")
-    print(" -so     standard out switch [true/false], switch to write to standard out, default:  true                                                          ")
-    print(" -ff     flag file, full path to a file that contains input flags, each flag in a new line, all lines in the file that does not start with a        ")
-    print("         flag are considered comments, if this flag is used no other flags should be given, default: '' (not used)                                  ")
-    print(" -ssl    turns on ssl certificate [true/false], makes it possible to use SAP HANA Sitter despite SSL, default: false                                ") 
-    print(" -vlh    virtual local host, if hanacleaner runs on a virtual host this has to be specified, default: '' (physical host is assumed)                 ")                
-    print(" -k      DB user key, this one has to be maintained in hdbuserstore, i.e. as <sid>adm do                                                            ")               
-    print("         > hdbuserstore SET <DB USER KEY> <ENV> <USERNAME> <PASSWORD>                     , default: SYSTEMKEY                                      ")
+    print("             *** CHECKS (Pings and/or Feature Checks and/or CPU Checks) ***                                                                             ")
+    print(" -oi         online test interval [seconds], time it waits before it checks if DB is online again, default: 3600 seconds                                ")
+    print(" -cpu        a 4 items list to control the cpu check: cpu type, number checks, interval, max average CPU in %, default: 0,0,0,100                       ")
+    print("             Possible cpu types are: 0 = not used, 1 = user cpu, 2 = system cpu                                                                         ")
+    print(" -pt         ping timeout [seconds], time it waits before the DB is considered unresponsive, default: 60 seconds                                        ")           
+    print(' -cf         list of features surrounded by two "s; the -cf flag has two modes, 1. One Column Mode and 2. Where Clause Mode                             ')
+    print("             1. One Column Mode: any sys.m_* view, a column in that view, the column value (wildcards, *, before and/or after are possible) and         ")
+    print("                max number allowed feature occations, i.e.                                                                                              ")
+    print('                "<m_view 1>,<feature 1>,<[*]value 1[*]>,<limit 1>,...,<m_view N>,<feature N>,<[*]value N[*]>,<limit N>"                                 ')
+    print("             2. Where Clause Mode: any sys.m_* view, the keyword 'WHERE', the where clause and max number allowed feature occations, i.e.               ")
+    print('                "<m_view 1>,WHERE,<where clause 1>,<limit 1>,...,<m_view N>,WHERE,<where clause N>,<limit N>"                                           ')
+    print('             default: ""                                                                                                                                ')
+    print('             Note: <limit> should be an integer, or an integer preceded by < (for maximum allowed) or > (for minumum allowed)                           ')
+    print('             Note: If you need a , in critical feature, please use \c instead, e.g. add_seconds(BLOCKED_TIME\c600)                                      ')
+    print(" -if         number checks and intervals of checks, every odd item of this list specifies how many times each feature check (see -cf) should be executed")
+    print("             and every even item specifies how many seconds it waits between each check, then the <max numbers X> in the -cf flag is the maximum        ")
+    print("             allowed average value, e.g. <number checks 1>,<interval [s] 1>,...,<number checks N>,<interval [s] N>, default: [] (not used)              ")
+    print(" -tf         feature check time out [seconds], time it waits before the DB is considered unresponsive during a feature check                            ")
+    print("             (see -cf), if -if is used this time out will be added to the interval and then multiplied with number checks, default: 60 seconds          ") 
+    print(" -lf         log features [true/false], logging ALL information of ALL critical features (beware: could be costly!), default: false                     ")
+    print(" -ci         check interval [seconds], time it waits before it checks cpu, pings and check features again, default: 60 seconds                          ") 
+    print(" -ar         time to sleep after recording [seconds], if negative it exits, default: -1                                                                 ")
+    print("             *** RECORDINGS (GStacks and/or Kernel Profiler Traces and/or Call Stacks and/or RTE dumps) ***                                             ")
+    print(" -rm         recording mode [1, 2 or 3], 1 = each requested recording types are done one after each other with the order above,                         ")
+    print("                                             e.g. GStack 1, GStack 2, ..., GStack N, RTE 1, RTE 2, ..., RTE N   (this is default)                       ")
+    print("                                         2 = the recordings of each requested recording types are done after each other with the                        ")
+    print("                                             order above, e.g. GStack 1, RTE 1, Gstack 2, RTE 2, ...                                                    ")
+    print("                                         3 = different recording types recorded in parallel threads, e.g. if 2 GStacks and 1 RTE                        ")
+    print("                                             requested then GStack 1 and RTE 1 are parallel done, when both done GStack 2 starts                        ")
+    print(" -rp         recording priorities [list of 4 integers [1,4]] defines what order the recording modes will be executed for rm = 1 and rm = 2              ")
+    print("                                                             # 1 = RTE, # 2 = CallStacks, # 3 = GStacks, # 4 = Kernel Profiler, default: 1,2,3,4        ")
+    print(" -hm         host mode [true/false], if true then all critical features are considered per host and the recording is done only for those hosts where    ")
+    print("                                     the critical feature is above allowed limit per host, default: false                                               ")
+    print("                                     Note: -hm is not supported for gstack (-ng), but for the other recording possibilities (-np, -nc, and -nr)         ")
+    print(" -ng         number indexserver gstacks created if the DB is considered unresponsive (Note: gstack blocks the indexserver! See SAP Note 2000000         ")
+    print('             "Call stack generation via gstack"), default: 0  (not used)                                                                                ') 
+    print(" -ig         gstacks interval [seconds], for -rm = 1: time it waits between each gstack,                                                                ")
+    print("                                         for -rm = 2: time it waits after a gstack,                                                                     ")
+    print("                                         for -rm = 3: time the thread waits after a gstack,          default: 60 seconds                                ")
+    print(" -np         number indexserver kernel profiler traces created if the DB is considered unresponsive: default: 0  (not used)                             ") 
+    print(" -dp         profiler duration [seconds], how long time it is tracing, default: 60 seconds   (more info: SAP Note 1804811)                              ")
+    print(" -wp         profiler wait time [milliseconds], wait time after callstacks of all running threads have been taken, default 0                            ")
+    print(" -ip         profiler interval [seconds], for -rm = 1: time it waits between each profiler trace,                                                       ")
+    print("                                          for -rm = 2: time it waits after a profiler trace,                                                            ")
+    print("                                          for -rm = 3: time the thread waits after a profiler trace,         default: 60 seconds                        ")
+    print(" -nc         number call stacks created if the DB is considered unresponsive: default: 0  (not used)                                                    ") 
+    print(" -ic         call stacks interval [seconds], for -rm = 1: time it waits between each call stack,                                                        ")
+    print("                                                 for -rm = 2: time it waits after a call stack,                                                         ")
+    print("                                                 for -rm = 3: time the thread waits after a call stack,  default: 60 seconds                            ")
+    print(" -nr         number rte dumps created if the DB is considered unresponsive: default: 0    (not used)                                                    ") 
+    print("             Note: output is restricted to these folders /tmp, $HOME, $DIR_INSTANCE/work, and $SAP_RETRIEVAL_PATH                                       ")
+    print(" -ir         rte dumps interval [seconds], for -rm = 1: time it waits between each rte dump,                                                            ")
+    print("                                           for -rm = 2: time it waits after an rte dump,                                                                ")
+    print("                                           for -rm = 3: time the thread waits after an rte dump,     default: 60 seconds                                ")
+    print(" -mr         rmte dump mode [0 or 1], -mr = 0: normal rte dump,                                                                                         ")
+    print("                                      -mr = 1: light rte dump mode, only rte dump with STACK_SHORT and THREADS sections, and some M_ views,  default: 0 ")
+    print("             *** KILL SESSIONS (use with care!) ***                                                                                                     ")
+    print(" -ks         kill session [list of true/false], list of booleans (length must be the same as number of features defined by -cf) that defines if -cf's   ")
+    print("             features could indicate that the sessions (connections) are tried to be disconnected or not, default: None (not used)                      ")
+    print("             Note: Requires SESSION ADMIN                                                                                                               ")
+    print("             *** ADMINS (Output Directory, Logging, Output and DB User) ***                                                                             ")
+    print(" -od         output directory, full path of the folder where all output files will end up (if the folder does not exist it will be created),            ")
+    print("             default: '/tmp/hanasitter_output'                                                                                                          ")
+    print(" -or         output log retention days, hanasitterlogs in the path specified with -od are only saved for this number of days, default: -1 (not used)    ")
+    print(" -en         email notification, <sender's email>,<reciever's email>,<mail server>, default:     (not used)                                             ") 
+    print("                   example: me@ourcompany.com,you@ourcompany.com,smtp.intra.ourcompany.com                                                              ")
+    print('             NOTE: For this to work you have to install the linux program "sendmail" and add a line similar to DSsmtp.intra.ourcompany.com in the file  ')
+    print("                   sendmail.cf in /etc/mail/, see https://www.systutorials.com/5167/sending-email-using-mailx-in-linux-through-internal-smtp/           ")
+    print(" -so         standard out switch [true/false], switch to write to standard out, default:  true                                                          ")
+    print(" -ff         flag file, full path to a file that contains input flags, each flag in a new line, all lines in the file that does not start with a        ")
+    print("             flag are considered comments, if this flag is used no other flags should be given, default: '' (not used)                                  ")
+    print(" -ssl        turns on ssl certificate [true/false], makes it possible to use SAP HANA Sitter despite SSL, default: false                                ") 
+    print(" -vlh        virtual local host, if hanacleaner runs on a virtual host this has to be specified, default: '' (physical host is assumed)                 ")                
+    print(" -k          DB user key, this one has to be maintained in hdbuserstore, i.e. as <sid>adm do                                                            ")               
+    print("             > hdbuserstore SET <DB USER KEY> <ENV> <USERNAME> <PASSWORD>                     , default: SYSTEMKEY                                      ")
     #ADDED#######################################################################################################################################################
-    print(" -zip    Zips the generated logs/dumps with the option to delete the original txt/trc file(s)                                                         ")
-    print("         modes: [n y d]                                                                                                                             ")
-    print("         n -> disabled                                                                                                                              ")
-    print("         y -> enabled                                                                                                                               ")
-    print("         d -> enabled with delete original trace                                                                                                    ")
+    print(" -zip        Zips the generated logs/dumps with the option to delete the original txt/trc file(s)                                                       ")
+    print("             modes: [no, yes, delete] (default: no)                                                                                                     ")
+    print("             no -> disabled                                                                                                                             ")
+    print("             yes -> enabled                                                                                                                             ")
+    print("             delete -> enabled with delete original trace                                                                                               ")
+    print(" -hda        Runs HANADumpAnalyzer using the last RTEdump taken.                                                                                        ")
+    print("             modes: [no, yes] (default: no)                                                                                                             ")
+    print("             Note: requires flags '-hda_jpath' and '-hda_path' to be setup properly.                                                                    ")
+    print(" -hda_jpath  Path to the java binary (ex. (...)/sapjvm_8/bin/java). Not set by default.                                                                 ")
+    print(" -hda_path   Path to the HANADumpAnalyzer jar file (ex. /usr/sap/<SID>/HDB<INSTANCE>/HANADumpAnalyzer.jar). Not set by default.                         ")
     #ADDED#######################################################################################################################################################
     print("                                                                                                                                                    ")
     print("EXAMPLE (if > 20 THREAD_STATE=Running, or > 30 THREAD_STATE=Semaphore Wait are found 2 RTE dumps and 3 GStacks will be recorded                     ")
@@ -185,12 +190,13 @@ emailNotification = None
 
 ######################## DEFINE CLASSES ##################################
 class RTESetting:
-    def __init__(self, num_rtedumps, rtedumps_interval, zip_file_mode, java_executable_path, hanadumpanalyzer_executable_path):
+    def __init__(self, num_rtedumps, rtedumps_interval, zip_mode, hda_enable, hda_jpath, hda_path):
         self.num_rtedumps = num_rtedumps
         self.rtedumps_interval = rtedumps_interval
-        self.zip_file_mode = zip_file_mode
-        self.java_executable_path = java_executable_path
-        self.hanadumpanalyzer_executable_path = hanadumpanalyzer_executable_path
+        self.zip_mode = zip_mode
+        self.hda_enable = hda_enable
+        self.hda_jpath = hda_jpath
+        self.hda_path = hda_path
         
 class CallStackSetting:
     def __init__(self, num_callstacks, callstacks_interval):
@@ -652,21 +658,24 @@ def record_rtedump(rte, hdbcons, comman):
             printout = "RTE Dump Record   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , True         ,   -        , "+full_path_filename   # if an [ERROR] happens that will be inside the file, hanasitter will not know it
             log(printout, comman)
             #ADDED#######################################################################################################################################################
+            
+            hanadump_analysis_location = ""
             #Process HANADump_Analyzer if enabled
-            hanadump_analysis_file = process_hanadump_analyzer(rte.java_executable_path, rte.hanadumpanalyzer_executable_path, full_path_filename)
-            print('HANA ANALYZER: The analysis is here: ' + hanadump_analysis_file)
+            if (rte.hda_enable == "yes"):
+                    hanadump_analysis_location = process_hanadump_analyzer(rte.hda_jpath, rte.hda_path, full_path_filename, comman)
+                    if not (hanadump_analysis_location == ""):
+                        log('> HAHADump Analyzer integration: The analysis is located here: ' + hanadump_analysis_location, comman)
 
-            #ADDED#######################################################################################################################################################
             #if we want to zip the txt(s)/trc(s) generated for this session want to delete the original file(s)
-            if not (rte.zip_file_mode == 'n') :
+            if (rte.zip_mode == 'yes' or rte.zip_mode == 'delete') :
                 files_to_zip = []
                 files_to_zip.append(full_path_filename)
-                if not (hanadump_analysis_file == ""):
-                    files_to_zip.append(hanadump_analysis_file)
+                if not (hanadump_analysis_location == ""):
+                    files_to_zip.append(hanadump_analysis_location)
                 zip_filename = "{0}/{1}_{2}_{3}{4}{5}.zip".format(comman.out_dir, host, hdbcons.SID, tenantDBString, gen_date, get_timezone)
                 #print('Zip Name:' +zip_filename)
-                zip_files(files_to_zip, zip_filename, rte.zip_file_mode)
-                printout = "Zipped contents" + (" and deleted original file(s) " if rte.zip_file_mode == 'd' else " ") +  ", " +datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ", File location: " + zip_filename
+                zip_files(files_to_zip, zip_filename, rte.zip_mode, comman)
+                printout = "> Zip procedure: "+ datetime.now().strftime("%Y-%m-%d %H:%M:%S") + " - Zipped contents" + (" and deleted original file(s)" if rte.zip_mode == 'delete' else " ") +  ", File location: " + zip_filename
                 log(printout, comman)
             #ADDED#######################################################################################################################################################
             total_printout += printout
@@ -835,7 +844,7 @@ def log(message, comman, file_name = "", sendEmail = False):
         output = subprocess.check_output(mailstring, shell=True)
 
 #ADDED#######################################################################################################################################################
-def zip_files(list_of_filenames, zip_filename, mode):
+def zip_files(list_of_filenames, zip_filename, mode, comman):
     files_to_zip = []
     zipped_file_list = []
     for filename in list_of_filenames:
@@ -859,7 +868,8 @@ def zip_files(list_of_filenames, zip_filename, mode):
         for file in files_to_zip:
             zf.write(file,compress_type=compression)
     except Exception, e:
-        print('ZipFile: Error in creation procedure' + str(e))
+        log('> Zip procedure: Error in archive creation procedure -' + str(e), comman)
+        #print('ZipFile: Error in creation procedure' + str(e))
     finally:
         zipped_file_list = zf.namelist()
         zf.close()
@@ -868,49 +878,62 @@ def zip_files(list_of_filenames, zip_filename, mode):
     try:
         for file in files_to_zip:
             #the name stored in the zipfile doesn't contain the first slash /
-            if(file[1:] in zipped_file_list and mode == 'd'):  
+            if(file[1:] in zipped_file_list and mode == 'delete'):  
                 #get the full path to the directory where the file is saved
                 file_directory = file.rsplit('/',1)[0]
                 #if we are treating a HANADump file, we also need to delete the directory created with the name of the trace.
                 if("HANADumpAnalyzer" in file_directory):
-                    os.system('rm -rf {0}'.format(file_directory))
+                    if(os.path.exists(file_directory)):
+                            os.system('rm -rf {0}'.format(file_directory))
+                            log('> Zip procedure: Deleted ' + file_directory, comman)
                 elif(os.path.exists(file)):
-                    os.system('rm {0}'.format(file))                          
+                    os.system('rm {0}'.format(file))
+                    log('> Zip procedure: Deleted ' + file, comman)                          
     except Exception, e:
-        print('ZipFile: Error in delete file procedure' + str(e))
+        log('> Zip procedure: Error in file(s) deletion procedure -' + str(e), comman)
+        #print('ZipFile: Error in delete file procedure' + str(e))
 
     zf.close()
 
-
-def process_hanadump_analyzer(java_path, hanadump_analyzer_path, trace_file_path):
+def process_hanadump_analyzer(hda_jpath, hda_path, trace_file_path, comman):
 
         #validate that all the paths are valid
-        if not (os.path.exists(java_path)):
-            print('HANADUMP_Analyzer error: Java path is invalid! Current value: ' + java_path)
+        if not (os.path.exists(hda_jpath)):
+            #print('HANADUMP_Analyzer error: Java path is invalid! Current value: ' + hda_jpath)
+            log('> HAHADump Analyzer integration: Java path is not valid - value received is ' + hda_jpath, comman)
             return ""
-        if not (os.path.exists(hanadump_analyzer_path)):
-            print('HANADUMP_Analyzer error: Hanadump_Analyzer path is invalid! Current value: ' + hanadump_analyzer_path)
+        if not (os.path.exists(hda_path)):
+            log('> HAHADump Analyzer integration: HANADump Analyzer jar path is not valid - value received is ' + hda_path, comman)
+            #print('HANADUMP_Analyzer error: Hanadump_Analyzer path is invalid! Current value: ' + hda_path)
             return ""
         if not (os.path.exists(trace_file_path)):
-            print('HANADUMP_Analyzer error: Invalid trace file! Current value: ' + trace_file_path)
+            log('> HAHADump Analyzer integration: Trace file is not valid - value received is ' + trace_file_path, comman)
+            #print('HANADUMP_Analyzer error: Invalid trace file! Current value: ' + trace_file_path)
             return ""
 
-        print('HANADUMP_Analyzer . all checks passed')
-
+        log('> HAHADump Analyzer integration: Generating the analysis file...', comman)
+        #print('HANADUMP_Analyzer . all checks passed')
 
         target_output_directory = trace_file_path.rsplit('/',1)[0] # get everything until the last "/" character
         runtimedump_file_name = trace_file_path.rsplit('/',1)[1][:-4] # get the trace name without the .trc
-        command_string = "{0} -jar {1} -s {2} -d {3}".format(java_path, hanadump_analyzer_path, trace_file_path,target_output_directory)
+        command_string = "{0} -jar {1} -s {2} -d {3}".format(hda_jpath, hda_path, trace_file_path, target_output_directory)
+
         try:
                 output = subprocess.check_output(command_string, shell=True)
         except Exception, e:
-                print('HANADUMP_Analyzer error: Exception found - ' + str(e))
-        print('HANADUMP_Analyzer executed successfuly!')
+                log('> HAHADump Analyzer integration: Exception found during analysis generation - ' + str(e), comman)
+                #print('HANADUMP_Analyzer error: Exception found - ' + str(e))
+        
+        log('> HAHADump Analyzer integration: Analysis generated successfuly!', comman)
+        ##print('HANADUMP_Analyzer executed successfuly!')
 
         analysis_path = "{0}/HANADumpAnalyzer/{1}/analysis.html".format(target_output_directory, runtimedump_file_name)
 
-        return analysis_path
-
+        if (os.path.exists(analysis_path)):
+            return analysis_path
+        else:
+            log('> HAHADump Analyzer integration: Unable to locate the analysis file - value received is ' + analysis_path, comman)
+            return ""
 
 #ADDED#######################################################################################################################################################
 
@@ -960,9 +983,10 @@ def main():
                             #     USER: SYSTEM
     cpu_check_params = ['0', '0','0','100'] # by default no cpu check
     #ADDED#######################################################################################################################################################
-    zip_file_mode = 'n'
-    java_executable_path = ''
-    hanadumpanalyzer_executable_path = ''
+    zip_mode = "no"
+    hda_enable = "no"
+    hda_jpath = ""
+    hda_path = ""
     #ADDED#######################################################################################################################################################
 
     #####################  CHECK INPUT ARGUMENTS #################
@@ -1058,7 +1082,13 @@ def main():
                         cpu_check_params = [x for x in flagValue.split(',')]
     #ADDED#######################################################################################################################################################
                     if firstWord == '-zip': 
-                        zip_file_mode = flagValue
+                        zip_mode = flagValue
+                    if firstWord == '-hda':
+                        hda_enable = flagValue
+                    if firstWord == '-hda_jpath':
+                        hda_jpath = flagValue
+                    if firstWord == '-hda_path':
+                        hda_path = flagValue
     #ADDED#######################################################################################################################################################
 
     #####################   INPUT ARGUMENTS (these would overwrite whats in the configuration file)  ####################     
@@ -1128,7 +1158,13 @@ def main():
         cpu_check_params = [x for x in sys.argv[  sys.argv.index('-cpu') + 1   ].split(',')]    
     #ADDED#######################################################################################################################################################
     if '-zip' in sys.argv:
-        zip_file_mode = sys.argv[sys.argv.index('-zip') + 1]
+        zip_mode = sys.argv[sys.argv.index('-zip') + 1]
+    if '-hda' in sys.argv:
+        hda_enable = sys.argv[sys.argv.index('-hda') + 1]
+    if '-hda_jpath' in sys.argv:
+        hda_jpath = sys.argv[sys.argv.index('-hda_jpath') + 1]
+    if '-hda_path' in sys.argv:
+        hda_path = sys.argv[sys.argv.index('-hda_path') + 1]
     #ADDED#######################################################################################################################################################
  
     ############ GET LOCAL HOST, LOCAL SQL PORT, LOCAL INSTANCE and SID ##########
@@ -1486,7 +1522,7 @@ def main():
         log("After Recording: Sleep "+str(after_recorded)+" seconds", comman)
     log(" - - - - - Start HANASitter - - - - - - ", comman)
     log("Action            , Timestamp              , Duration         , Successful   , Result     , Comment ", comman)
-    rte = RTESetting(num_rtedumps, rtedumps_interval, zip_file_mode, java_executable_path, hanadumpanalyzer_executable_path)
+    rte = RTESetting(num_rtedumps, rtedumps_interval, zip_mode, hda_enable, hda_jpath, hda_path)
     callstack = CallStackSetting(num_callstacks, callstacks_interval)
     gstack = GStackSetting(num_gstacks, gstacks_interval)
     kprofiler = KernelProfileSetting(num_kprofs, kprofs_interval, kprofs_duration, kprofs_wait)
