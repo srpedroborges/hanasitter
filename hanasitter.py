@@ -6,9 +6,10 @@ from multiprocessing import Pool
 import shutil
 import zipfile
 from time import tzname
-#import smtplib
-#from email.mime.multipart import MIMEMultipart
-#from email.mime.text import MIMEText
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.utils import COMMASPACE, formatdate
 
 
 def printHelp():
@@ -937,6 +938,45 @@ def process_hanadump_analyzer(hda_jpath, hda_path, trace_file_path, comman):
 
 #ADDED#######################################################################################################################################################
 
+
+def send_email(mail_from, mail_to, mail_subject, mail_text, attachments, smtp, comman):
+
+    #validations
+    if(mail_from is "" or "@" not in mail_from):
+        log('> Process Email: Invalid "from" - value received is ' + "EMPTY_VALUE" if (mail_from is "") else mail_from, comman)
+        return
+    if(mail_to is "" or "@" not in mail_to):
+        log('> Process Email: Invalid "to" - value received is ' + "EMPTY_VALUE" if (mail_to is "") else mail_to, comman)
+        return
+    if(mail_subject is ""):
+        log('> Process Email: Invalid "subject" - value received is EMPTY_VALUE', comman)
+        return
+    if(smtp is ""):
+        log('> Process Email: Invalid "smtp server" - value received is EMPTY_VALUE', comman)
+        return
+
+    #Based on: https://stackoverflow.com/questions/3362600/how-to-send-email-attachments (379)
+    email = MIMEMultipart()
+    email["From"] = mail_from
+    email["To"] = mail_to #for now it expects mail_to to be one or more emails separated by a comma ','
+    email["Date"] = formatdate(localtime=True)
+    email["Subject"] = mail_subject
+
+    email.attach(MIMEText(mail_text))
+
+    #Process attachments
+    for file in attachments or []:
+        with open(f,"rb") as working_file:
+            attachment = MIMEApplication(working_file.read(), Name=basename(file))
+        attachment['Content-Disposition'] = 'attachment; filename="%s"' % basename(file)
+        email.attach(attachment)
+
+
+    process_email = smtplib.SMTP(smtp)
+    process_email.sendmail(mail_from, mail_to, mail.as_string())
+    process_email.close()
+
+
     
 def main():
     #####################  CHECK PYTHON VERSION ###########
@@ -987,6 +1027,9 @@ def main():
     hda_enable = "no"
     hda_jpath = ""
     hda_path = ""
+    mail_from = ""
+    mail_to = ""
+    smtp = ""
     #ADDED#######################################################################################################################################################
 
     #####################  CHECK INPUT ARGUMENTS #################
@@ -1089,7 +1132,13 @@ def main():
                         hda_jpath = flagValue
                     if firstWord == '-hda_path':
                         hda_path = flagValue
-    #ADDED#######################################################################################################################################################
+                    if firstWord == '-mfrom':
+                        mail_from = flagValue
+                    if firstWord == '-mto':
+                        mail_to = flagValue
+                    if firstWord == '-smtp':
+                        smtp = flagValue
+    #########################################################################################################################################
 
     #####################   INPUT ARGUMENTS (these would overwrite whats in the configuration file)  ####################     
     if '-oi' in sys.argv:
@@ -1165,6 +1214,12 @@ def main():
         hda_jpath = sys.argv[sys.argv.index('-hda_jpath') + 1]
     if '-hda_path' in sys.argv:
         hda_path = sys.argv[sys.argv.index('-hda_path') + 1]
+    if '-mfrom' in sys.argv:
+        mail_from = sys.argv[sys.argv.index('-mfrom') + 1]
+    if '-mto' in sys.argv:
+        mail_to = sys.argv[sys.argv.index('-mto') + 1]
+    if '-smtp' in sys.argv:
+        smtp = sys.argv[sys.argv.index('-smtp') + 1]
     #ADDED#######################################################################################################################################################
  
     ############ GET LOCAL HOST, LOCAL SQL PORT, LOCAL INSTANCE and SID ##########
