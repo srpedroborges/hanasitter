@@ -13,201 +13,181 @@ from email.utils import COMMASPACE, formatdate
 
 
 def printHelp():
-    print("                                                                                                                                                        		   ")    
-    print("DESCRIPTION:                                                                                                                                            		   ")
-    print(" The HANA sitter checks regularly (def. 1h) if HANA is online and primary. If so, it starts to track. Tracking includes                                 		   ")
-    print(" regularly (def. 1m) checks if HANA is responsive. If it is not, it will record. Recording could include writing call stacks                            		   ")
-    print(" of all active threads and/or record run time dumps and/or indexserver gstacks and/or kernel profiler traces. By default                                		   ")
-    print(" nothing is recorded. If HANA is responsive it will check for too many critical features of HANA. By default this is checking                           		   ")
-    print(" if there are more than 30 active threads. If there is, it will record (see above). After it is done recording it will by                               		   ")
-    print(" default exit, but could also restart, if so wanted.                                                                                                    		   ") 
-    print(" After it has concluded that all was good, it will wait (def. 1h) and then start all over to check again if HANA is online                              		   ")
-    print(" and primary. See also SAP Note 2399979.                                                                                                                		   ")
-    print("                                                                                                                                                        		   ")
-    print("PREREQUISITES:                                                                                                                                          		   ")
-    print(" - Executed by <sid>adm                                                                                                                                 		   ")
-    print(" - A DB user with proper privileges maintained in hdbuserstore (to be used with the -k flag)                                                            		   ")
-    print(' - In case you run HANASitter on a virtual host the linux command "hostname" have to return the logical host name (not the physical)                    		   ')
-    print(" - Should be executed on (one of) the host(s) on which (one of) the HANA node(s) is running                                                             		   ")
-    print(""" - /bin/bash has to return "clean" outputs, e.g.  /bin/bash -i -c "alias cdhdb"  should ONLY return something like  alias cdhdb='cd $DIR_INSTANCE'                  """)
-    print("                                                                                                                                                        		   ")
-    print("INPUT ARGUMENTS:                                                                                                                                        		   ")
-    print("             *** CHECKS (Pings and/or Feature Checks and/or CPU Checks) ***                                                                             		   ")
-    print(" -oi         online test interval [seconds], time it waits before it checks if DB is online again, default: 3600 seconds                                		   ")
-    print(" -cpu        a 4 items list to control the cpu check: cpu type, number checks, interval, max average CPU in %, default: 0,0,0,100                       		   ")
-    print("             Possible cpu types are: 0 = not used, 1 = user cpu, 2 = system cpu                                                                         		   ")
-    print(" -pt         ping timeout [seconds], time it waits before the DB is considered unresponsive, default: 60 seconds                                        		   ")           
-    print(' -cf         list of features surrounded by two "s; the -cf flag has two modes, 1. One Column Mode and 2. Where Clause Mode                             		   ')
-    print("             1. One Column Mode: any sys.m_* view, a column in that view, the column value (wildcards, *, before and/or after are possible),         		   ")
-    print("                max number allowed feature occations,alert only or take action (ex. rte dump),better description for the check 					   ")
-    print("		   i.e.                   					                                                                           		   ")
-    print('                "<m_view 1>,<feature 1>,<[*]value 1[*]>,<limit 1>,...,<m_view N>,<feature N>,<[*]value N[*]>,<limit N>,<bool alert only>,<pretty description>"          ')
-    print("             2. Where Clause Mode: any sys.m_* view, the keyword 'WHERE', the where clause and max number allowed feature occations,alert only bool, pretty Description ")
-    print("		   i.e:																			   ")	
-    print('                "<m_view 1>,WHERE,<where clause 1>,<limit 1>,...,<m_view N>,WHERE,<where clause N>,<limit N>,<bool alert only>,<pretty description>"                    ')
-    print('             default: ""                                                                                                                                		   ')
-    print('             Note: <limit> should be an integer, or an integer preceded by < (for maximum allowed) or > (for minumum allowed)                           		   ')
-    print('             Note: If you need a , in critical feature, please use \c instead, e.g. add_seconds(BLOCKED_TIME\c600)                                      		   ')
-    print(" -if         number checks and intervals of checks, every odd item of this list specifies how many times each feature check (see -cf) should be executed		   ")
-    print("             and every even item specifies how many seconds it waits between each check, then the <max numbers X> in the -cf flag is the maximum        		   ")
-    print("             allowed average value, e.g. <number checks 1>,<interval [s] 1>,...,<number checks N>,<interval [s] N>, default: [] (not used)              		   ")
-    print(" -tf         feature check time out [seconds], time it waits before the DB is considered unresponsive during a feature check                            		   ")
-    print("             (see -cf), if -if is used this time out will be added to the interval and then multiplied with number checks, default: 60 seconds          		   ") 
-    print(" -lf         log features [true/false], logging ALL information of ALL critical features (beware: could be costly!), default: false                     		   ")
-    print(" -ci         check interval [seconds], time it waits before it checks cpu, pings and check features again, default: 60 seconds                          		   ") 
-    print(" -ar         time to sleep after recording [seconds], if negative it exits, default: -1                                                                 		   ")
-    print("             *** RECORDINGS (GStacks and/or Kernel Profiler Traces and/or Call Stacks and/or RTE dumps) ***                                             		   ")
-    print(" -rm         recording mode [1, 2 or 3], 1 = each requested recording types are done one after each other with the order above,                         		   ")
-    print("                                             e.g. GStack 1, GStack 2, ..., GStack N, RTE 1, RTE 2, ..., RTE N   (this is default)                       		   ")
-    print("                                         2 = the recordings of each requested recording types are done after each other with the                        		   ")
-    print("                                             order above, e.g. GStack 1, RTE 1, Gstack 2, RTE 2, ...                                                    		   ")
-    print("                                         3 = different recording types recorded in parallel threads, e.g. if 2 GStacks and 1 RTE                        		   ")
-    print("                                             requested then GStack 1 and RTE 1 are parallel done, when both done GStack 2 starts                        		   ")
-    print(" -rp         recording priorities [list of 4 integers [1,4]] defines what order the recording modes will be executed for rm = 1 and rm = 2              		   ")
-    print("                                                             # 1 = RTE, # 2 = CallStacks, # 3 = GStacks, # 4 = Kernel Profiler, default: 1,2,3,4        		   ")
-    print(" -hm         host mode [true/false], if true then all critical features are considered per host and the recording is done only for those hosts where    		   ")
-    print("                                     the critical feature is above allowed limit per host, default: false                                               		   ")
-    print("                                     Note: -hm is not supported for gstack (-ng), but for the other recording possibilities (-np, -nc, and -nr)         		   ")
-    print(" -ng         number indexserver gstacks created if the DB is considered unresponsive (Note: gstack blocks the indexserver! See SAP Note 2000000         		   ")
-    print('             "Call stack generation via gstack"), default: 0  (not used)                                                                                		   ') 
-    print(" -ig         gstacks interval [seconds], for -rm = 1: time it waits between each gstack,                                                                		   ")
-    print("                                         for -rm = 2: time it waits after a gstack,                                                                     		   ")
-    print("                                         for -rm = 3: time the thread waits after a gstack,          default: 60 seconds                                		   ")
-    print(" -np         number indexserver kernel profiler traces created if the DB is considered unresponsive: default: 0  (not used)                             		   ") 
-    print(" -dp         profiler duration [seconds], how long time it is tracing, default: 60 seconds   (more info: SAP Note 1804811)                              		   ")
-    print(" -wp         profiler wait time [milliseconds], wait time after callstacks of all running threads have been taken, default 0                            		   ")
-    print(" -ip         profiler interval [seconds], for -rm = 1: time it waits between each profiler trace,                                                       		   ")
-    print("                                          for -rm = 2: time it waits after a profiler trace,                                                            		   ")
-    print("                                          for -rm = 3: time the thread waits after a profiler trace,         default: 60 seconds                        		   ")
-    print(" -nc         number call stacks created if the DB is considered unresponsive: default: 0  (not used)                                                    		   ") 
-    print(" -ic         call stacks interval [seconds], for -rm = 1: time it waits between each call stack,                                                        		   ")
-    print("                                                 for -rm = 2: time it waits after a call stack,                                                         		   ")
-    print("                                                 for -rm = 3: time the thread waits after a call stack,  default: 60 seconds                            		   ")
-    print(" -nr         number rte dumps created if the DB is considered unresponsive: default: 0    (not used)                                                    		   ") 
-    print("             Note: output is restricted to these folders /tmp, $HOME, $DIR_INSTANCE/work, and $SAP_RETRIEVAL_PATH                                       		   ")
-    print(" -ir         rte dumps interval [seconds], for -rm = 1: time it waits between each rte dump,                                                            		   ")
-    print("                                           for -rm = 2: time it waits after an rte dump,                                                                		   ")
-    print("                                           for -rm = 3: time the thread waits after an rte dump,     default: 60 seconds                                		   ")
-    print(" -mr         rmte dump mode [0 or 1], -mr = 0: normal rte dump,                                                                                         		   ")
-    print("                                      -mr = 1: light rte dump mode, only rte dump with STACK_SHORT and THREADS sections, and some M_ views,  default: 0 		   ")
-    print("             *** KILL SESSIONS (use with care!) ***                                                                                                     		   ")
-    print(" -ks         kill session [list of true/false], list of booleans (length must be the same as number of features defined by -cf) that defines if -cf's   		   ")
-    print("             features could indicate that the sessions (connections) are tried to be disconnected or not, default: None (not used)                      		   ")
-    print("             Note: Requires SESSION ADMIN                                                                                                               		   ")
-    print("             *** ADMINS (Output Directory, Logging, Output and DB User) ***                                                                             		   ")
-    print(" -od         output directory, full path of the folder where all output files will end up (if the folder does not exist it will be created),            		   ")
-    print("             default: '/tmp/hanasitter_output'                                                                                                          		   ")
-    print(" -or         output log retention days, hanasitterlogs in the path specified with -od are only saved for this number of days, default: -1 (not used)    		   ")
-    print(" -en         email notification, <sender's email>,<reciever's email>,<mail server>, default:     (not used)                                             		   ") 
-    print("                   example: me@ourcompany.com,you@ourcompany.com,smtp.intra.ourcompany.com                                                              		   ")
-    print('             NOTE: For this to work you have to install the linux program "sendmail" and add a line similar to DSsmtp.intra.ourcompany.com in the file  		   ')
-    print("                   sendmail.cf in /etc/mail/, see https://www.systutorials.com/5167/sending-email-using-mailx-in-linux-through-internal-smtp/           		   ")
-    print(" -so         standard out switch [true/false], switch to write to standard out, default:  true                                                          		   ")
-    print(" -ff         flag file, full path to a file that contains input flags, each flag in a new line, all lines in the file that does not start with a        		   ")
-    print("             flag are considered comments, if this flag is used no other flags should be given, default: '' (not used)                                  		   ")
-    print(" -ssl        turns on ssl certificate [true/false], makes it possible to use SAP HANA Sitter despite SSL, default: false                                		   ") 
-    print(" -vlh        virtual local host, if hanacleaner runs on a virtual host this has to be specified, default: '' (physical host is assumed)                 		   ")                
-    print(" -k          DB user key, this one has to be maintained in hdbuserstore, i.e. as <sid>adm do                                                            		   ")               
-    print("             > hdbuserstore SET <DB USER KEY> <ENV> <USERNAME> <PASSWORD>                     , default: SYSTEMKEY                                      		   ")
+    print("                                                                                                                                                    ")    
+    print("DESCRIPTION:                                                                                                                                        ")
+    print(" The HANA sitter checks regularly (def. 1h) if HANA is online and primary. If so, it starts to track. Tracking includes                             ")
+    print(" regularly (def. 1m) checks if HANA is responsive. If it is not, it will record. Recording could include writing call stacks                        ")
+    print(" of all active threads and/or record run time dumps and/or indexserver gstacks and/or kernel profiler traces. By default                            ")
+    print(" nothing is recorded. If HANA is responsive it will check for too many critical features of HANA. By default this is checking                       ")
+    print(" if there are more than 30 active threads. If there is, it will record (see above). After it is done recording it will by                           ")
+    print(" default exit, but could also restart, if so wanted.                                                                                                ") 
+    print(" After it has concluded that all was good, it will wait (def. 1h) and then start all over to check again if HANA is online                          ")
+    print(" and primary. See also SAP Note 2399979.                                                                                                            ")
+    print("                                                                                                                                                    ")
+    print("PREREQUISITES:                                                                                                                                      ")
+    print(" - Executed by <sid>adm                                                                                                                             ")
+    print(" - A DB user with proper privileges maintained in hdbuserstore (to be used with the -k flag)                                                        ")
+    print(' - In case you run HANASitter on a virtual host the linux command "hostname" have to return the logical host name (not the physical)                ')
+    print(" - Should be executed on (one of) the host(s) on which (one of) the HANA node(s) is running                                                         ")
+    print(""" - /bin/bash has to return "clean" outputs, e.g.  /bin/bash -i -c "alias cdhdb"  should ONLY return something like  alias cdhdb='cd $DIR_INSTANCE'  """)
+    print("                                                                                                                                                    ")
+    print("INPUT ARGUMENTS:                                                                                                                                    ")
+    print("             *** CHECKS (Pings and/or Feature Checks and/or CPU Checks) ***                                                                             ")
+    print(" -oi         online test interval [seconds], time it waits before it checks if DB is online again, default: 3600 seconds                                ")
+    print(" -cpu        a 4 items list to control the cpu check: cpu type, number checks, interval, max average CPU in %, default: 0,0,0,100                       ")
+    print("             Possible cpu types are: 0 = not used, 1 = user cpu, 2 = system cpu                                                                         ")
+    print(" -pt         ping timeout [seconds], time it waits before the DB is considered unresponsive, default: 60 seconds                                        ")           
+    print(' -cf         list of features surrounded by two "s; the -cf flag has two modes, 1. One Column Mode and 2. Where Clause Mode                             ')
+    print("             1. One Column Mode: any sys.m_* view, a column in that view, the column value (wildcards, *, before and/or after are possible) and         ")
+    print("                max number allowed feature occations, i.e.                                                                                              ")
+    print('                "<m_view 1>,<feature 1>,<[*]value 1[*]>,<limit 1>,...,<m_view N>,<feature N>,<[*]value N[*]>,<limit N>"                                 ')
+    print("             2. Where Clause Mode: any sys.m_* view, the keyword 'WHERE', the where clause and max number allowed feature occations, i.e.               ")
+    print('                "<m_view 1>,WHERE,<where clause 1>,<limit 1>,...,<m_view N>,WHERE,<where clause N>,<limit N>"                                           ')
+    print('             default: ""                                                                                                                                ')
+    print('             Note: <limit> should be an integer, or an integer preceded by < (for maximum allowed) or > (for minumum allowed)                           ')
+    print('             Note: If you need a , in critical feature, please use \c instead, e.g. add_seconds(BLOCKED_TIME\c600)                                      ')
+    print(" -if         number checks and intervals of checks, every odd item of this list specifies how many times each feature check (see -cf) should be executed")
+    print("             and every even item specifies how many seconds it waits between each check, then the <max numbers X> in the -cf flag is the maximum        ")
+    print("             allowed average value, e.g. <number checks 1>,<interval [s] 1>,...,<number checks N>,<interval [s] N>, default: [] (not used)              ")
+    print(" -tf         feature check time out [seconds], time it waits before the DB is considered unresponsive during a feature check                            ")
+    print("             (see -cf), if -if is used this time out will be added to the interval and then multiplied with number checks, default: 60 seconds          ") 
+    print(" -lf         log features [true/false], logging ALL information of ALL critical features (beware: could be costly!), default: false                     ")
+    print(" -ci         check interval [seconds], time it waits before it checks cpu, pings and check features again, default: 60 seconds                          ") 
+    print(" -ar         time to sleep after recording [seconds], if negative it exits, default: -1                                                                 ")
+    print("             *** RECORDINGS (GStacks and/or Kernel Profiler Traces and/or Call Stacks and/or RTE dumps) ***                                             ")
+    print(" -rm         recording mode [1, 2 or 3], 1 = each requested recording types are done one after each other with the order above,                         ")
+    print("                                             e.g. GStack 1, GStack 2, ..., GStack N, RTE 1, RTE 2, ..., RTE N   (this is default)                       ")
+    print("                                         2 = the recordings of each requested recording types are done after each other with the                        ")
+    print("                                             order above, e.g. GStack 1, RTE 1, Gstack 2, RTE 2, ...                                                    ")
+    print("                                         3 = different recording types recorded in parallel threads, e.g. if 2 GStacks and 1 RTE                        ")
+    print("                                             requested then GStack 1 and RTE 1 are parallel done, when both done GStack 2 starts                        ")
+    print(" -rp         recording priorities [list of 4 integers [1,4]] defines what order the recording modes will be executed for rm = 1 and rm = 2              ")
+    print("                                                             # 1 = RTE, # 2 = CallStacks, # 3 = GStacks, # 4 = Kernel Profiler, default: 1,2,3,4        ")
+    print(" -hm         host mode [true/false], if true then all critical features are considered per host and the recording is done only for those hosts where    ")
+    print("                                     the critical feature is above allowed limit per host, default: false                                               ")
+    print("                                     Note: -hm is not supported for gstack (-ng), but for the other recording possibilities (-np, -nc, and -nr)         ")
+    print(" -ng         number indexserver gstacks created if the DB is considered unresponsive (Note: gstack blocks the indexserver! See SAP Note 2000000         ")
+    print('             "Call stack generation via gstack"), default: 0  (not used)                                                                                ') 
+    print(" -ig         gstacks interval [seconds], for -rm = 1: time it waits between each gstack,                                                                ")
+    print("                                         for -rm = 2: time it waits after a gstack,                                                                     ")
+    print("                                         for -rm = 3: time the thread waits after a gstack,          default: 60 seconds                                ")
+    print(" -np         number indexserver kernel profiler traces created if the DB is considered unresponsive: default: 0  (not used)                             ") 
+    print(" -dp         profiler duration [seconds], how long time it is tracing, default: 60 seconds   (more info: SAP Note 1804811)                              ")
+    print(" -wp         profiler wait time [milliseconds], wait time after callstacks of all running threads have been taken, default 0                            ")
+    print(" -ip         profiler interval [seconds], for -rm = 1: time it waits between each profiler trace,                                                       ")
+    print("                                          for -rm = 2: time it waits after a profiler trace,                                                            ")
+    print("                                          for -rm = 3: time the thread waits after a profiler trace,         default: 60 seconds                        ")
+    print(" -nc         number call stacks created if the DB is considered unresponsive: default: 0  (not used)                                                    ") 
+    print(" -ic         call stacks interval [seconds], for -rm = 1: time it waits between each call stack,                                                        ")
+    print("                                                 for -rm = 2: time it waits after a call stack,                                                         ")
+    print("                                                 for -rm = 3: time the thread waits after a call stack,  default: 60 seconds                            ")
+    print(" -nr         number rte dumps created if the DB is considered unresponsive: default: 0    (not used)                                                    ") 
+    print("             Note: output is restricted to these folders /tmp, $HOME, $DIR_INSTANCE/work, and $SAP_RETRIEVAL_PATH                                       ")
+    print(" -ir         rte dumps interval [seconds], for -rm = 1: time it waits between each rte dump,                                                            ")
+    print("                                           for -rm = 2: time it waits after an rte dump,                                                                ")
+    print("                                           for -rm = 3: time the thread waits after an rte dump,     default: 60 seconds                                ")
+    print(" -mr         rmte dump mode [0 or 1], -mr = 0: normal rte dump,                                                                                         ")
+    print("                                      -mr = 1: light rte dump mode, only rte dump with STACK_SHORT and THREADS sections, and some M_ views,  default: 0 ")
+    print("             *** KILL SESSIONS (use with care!) ***                                                                                                     ")
+    print(" -ks         kill session [list of true/false], list of booleans (length must be the same as number of features defined by -cf) that defines if -cf's   ")
+    print("             features could indicate that the sessions (connections) are tried to be disconnected or not, default: None (not used)                      ")
+    print("             Note: Requires SESSION ADMIN                                                                                                               ")
+    print("             *** ADMINS (Output Directory, Logging, Output and DB User) ***                                                                             ")
+    print(" -od         output directory, full path of the folder where all output files will end up (if the folder does not exist it will be created),            ")
+    print("             default: '/tmp/hanasitter_output'                                                                                                          ")
+    print(" -or         output log retention days, hanasitterlogs in the path specified with -od are only saved for this number of days, default: -1 (not used)    ")
+    print(" -en         email notification, <sender's email>,<reciever's email>,<mail server>, default:     (not used)                                             ") 
+    print("                   example: me@ourcompany.com,you@ourcompany.com,smtp.intra.ourcompany.com                                                              ")
+    print('             NOTE: For this to work you have to install the linux program "sendmail" and add a line similar to DSsmtp.intra.ourcompany.com in the file  ')
+    print("                   sendmail.cf in /etc/mail/, see https://www.systutorials.com/5167/sending-email-using-mailx-in-linux-through-internal-smtp/           ")
+    print(" -so         standard out switch [true/false], switch to write to standard out, default:  true                                                          ")
+    print(" -ff         flag file, full path to a file that contains input flags, each flag in a new line, all lines in the file that does not start with a        ")
+    print("             flag are considered comments, if this flag is used no other flags should be given, default: '' (not used)                                  ")
+    print(" -ssl        turns on ssl certificate [true/false], makes it possible to use SAP HANA Sitter despite SSL, default: false                                ") 
+    print(" -vlh        virtual local host, if hanacleaner runs on a virtual host this has to be specified, default: '' (physical host is assumed)                 ")                
+    print(" -k          DB user key, this one has to be maintained in hdbuserstore, i.e. as <sid>adm do                                                            ")               
+    print("             > hdbuserstore SET <DB USER KEY> <ENV> <USERNAME> <PASSWORD>                     , default: SYSTEMKEY                                      ")
     #ADDED#######################################################################################################################################################
-    print(" -zip        Zips the generated logs/dumps with the option to delete the original txt/trc file(s)                                                       		   ")
-    print("             modes: [no, yes, delete] (default: no)                                                                                                     		   ")
-    print("             no -> disabled                                                                                                                             		   ")
-    print("             yes -> enabled                                                                                                                             		   ")
-    print("             delete -> enabled with delete original trace                                                                                               		   ")
-    print(" -hda        Runs HANADumpAnalyzer using the last RTEdump taken.                                                                                        		   ")
-    print("             modes: [no, yes] (default: no)                                                                                                             		   ")
-    print("             Note: requires flags '-hda_jpath' and '-hda_path' to be setup properly.                                                                    		   ")
-    print(" -hda_jpath  Path to the java binary (ex. (...)/sapjvm_8/bin/java). Not set by default.                                                                 		   ")
-    print(" -hda_path   Path to the HANADumpAnalyzer jar file (ex. /usr/sap/<SID>/HDB<INSTANCE>/HANADumpAnalyzer.jar). Not set by default.                         		   ")
-    print(" -sn         Slack Webhook for slack integration										                         		   ")
+    print(" -zip        Zips the generated logs/dumps with the option to delete the original txt/trc file(s)                                                       ")
+    print("             modes: [no, yes, delete] (default: no)                                                                                                     ")
+    print("             no -> disabled                                                                                                                             ")
+    print("             yes -> enabled                                                                                                                             ")
+    print("             delete -> enabled with delete original trace                                                                                               ")
+    print(" -hda        Runs HANADumpAnalyzer using the last RTEdump taken.                                                                                        ")
+    print("             modes: [no, yes] (default: no)                                                                                                             ")
+    print("             Note: requires flags '-hda_jpath' and '-hda_path' to be setup properly.                                                                    ")
+    print(" -hda_jpath  Path to the java binary (ex. (...)/sapjvm_8/bin/java). Not set by default.                                                                 ")
+    print(" -hda_path   Path to the HANADumpAnalyzer jar file (ex. /usr/sap/<SID>/HDB<INSTANCE>/HANADumpAnalyzer.jar). Not set by default.                         ")
     #ADDED#######################################################################################################################################################
-    print("                                                                                                                                                                        ")
-    print("EXAMPLE (if > 20 THREAD_STATE=Running, or > 30 THREAD_STATE=Semaphore Wait are found 2 RTE dumps and 3 GStacks will be recorded                                         ")
-    print("         in parallel, i.e. RTE1&GStack1, RTE2&GStack2, GStack3):                                                                                                        ")
-    print('  > python hanasitter.py -cf "M_SERVICE_THREADS,THREAD_STATE,Running,30,M_SERVICE_THREADS,THREAD_STATE,Semaphore Wait,20,false,30thr in semaph. wait" -nr 2 -ng 3 -rm 3 ')
-    print("                                                                                                                                                                        ")
-    print("EXAMPLE (if, on average from 3 checks with 5s interval, > 30 THREAD_STATE=Running, or if any column from the table VARINUM has been unloaded,                           ")
-    print("         then record two call stacks)                                                                                                                                   ")    
-    print('  > python hanasitter.py -cf "M_SERVICE_THREADS,THREAD_STATE,Running,30,false,30 thr running,M_CS_UNLOADS,TABLE_NAME,VARINUM,1,false,unload VARINUM " -if 3,5,1,0 -nc 2 ')
-    print("                                                                                                                                                                        ")
-    print("EXAMPLE (Here a where clause is given, if more than 3 active indexserver threads runs longer than about 5 days (duration is in ms))                                     ")    
-    print('''  > python hanasitter.py -cf "M_SERVICE_THREADS,WHERE,IS_ACTIVE='TRUE' and SERVICE_NAME='indexserver' and DURATION>420000000,3,false,more than 3 threads > 5m" -nc 2''')
-    print("                                                                                                                                                                        ")
-    print("EXAMPLE (if average system CPU >95% or Ping > 30 seconds, 2 Call Stacks are recorded, or else it will try again after 120 seconds, after                                ")
-    print("         recording it will sleep for one hour before it starts to track again):                                                                                         ")                                              
-    print("  > python hanasitter.py -cpu 2,5,2,95 -pt 30 -ci 120 -nc 2 -ar 3600                                                                                                    ")
-    print("                                                                                                                                                                        ")
-    print("EXAMPLE (if there are more then 10 threads from the Application user AUSER123 or from the DB user DUSER123 record 2 RTE dumps):                                         ")
-    print('  > python hanasitter.py -cf "M_SERVICE_THREADS,APPLICATION_USER_NAME,AUSER123,10,M_SERVICE_THREADS,USER_NAME,DUSER123,10,false,10 threads user AUSER123" -nr 2         ')
-    print("                                                                                                                                                                        ")
-    print("EXAMPLE (if there are more then 5 threads with a thread method that starts with PlanExecutor or with a thread type that                                                 ")
-    print("         includes Attribute or that is executed from any user starting with DUSER12, then 5 GStacks are recorded                                                        ") 
-    print("""  > python hanasitter.py -cf "M_SERVICE_THREADS,THREAD_METHOD,PlanExecutor*,5,false,5 PlanExecutor (next like is the continuation of this one; single line)         """)
-    print("""                         ,M_SERVICE_THREADS,THREAD_TYPE,*Attribute*,5,M_SERVICE_THREADS,USER_NAME,DUSER12*,5,false,Username starting with DUSER12" -ng 5            """)
-    print("                                                                                                                                                                        ")
-    print("EXAMPLE (reads a configuration file, but one flag will overwrite what is in the configuration file, i.e. there will be 3 callstacks instead of 2):                      ")
-    print("  > python hanasitter.py -ff /tmp/HANASitter/hanasitter_configfile.txt -nc 3                                                                                            ")
-    print("    Where the config file could looks like this:                                                                                                                        ")
-    print("                                  MY HANASITTER CONFIGURATION FILE                                                                                                      ")
-    print("                                  If more than 20 threads is in state TREAD_STATE=Running                                                                               ")
-    print('                                  -cf "M_SERVICE_THREADS,THREAD_STATE,Running,20,false,pretty description"                                                              ')
-    print("                                  then 2 call stacks                                                                                                                    ")
-    print("                                  -nc 2                                                                                                                                 ")
-    print("                                  with 30 seconds between them                                                                                                          ")
-    print("                                  -ic 30                                                                                                                                ")
-    print("                                  are recorded. This is the key in hdbuserstore that is used:                                                                           ")
-    print("                                  -k SYSTEMKEY                                                                                                                          ")
-    print("                                                                                                                                                                        ")
-    print("CURRENT KNOWN LIMITATIONS (i.e. TODO LIST):                                                                                                                             ")
-    print(" 1. Record in parallel for different Scale-Out Nodes   (should work for some recording types, e.g. RTE dumps -->  TODO)                                                 ")
-    print(" 2. If a CPU only happens on one Host, possible to record on only one Host                                                                                              ")
-    print(" 3. CPU should be possible to be checked for BOTH system AND user --> TODO                                                                                              ")
-    print(" 4. Let HANASitter first check that there is no other hanasitter process running --> refuse to run --> TODO  (but can be done with cron, see slides)                    ")
-    print(" 5. Read config file, -ff, after hanasitter slept, so that it will allow dynamic changes                                                                                ")
-    print(" 6. Make the PING check specific for HOSTS (and only record for that host) ... can be done with ROUTE_TO(<volume_id_1>, ..., <volume_id_n>)                             ")
-    print("                                                                                                                                                                        ")
-    print("AUTHOR: Christian Hansen                                                                                                                                                ")
-    print("                                                                                                                                                                        ")
-    print("                                                                                                                                                                        ")
+    print("                                                                                                                                                    ")
+    print("EXAMPLE (if > 20 THREAD_STATE=Running, or > 30 THREAD_STATE=Semaphore Wait are found 2 RTE dumps and 3 GStacks will be recorded                     ")
+    print("         in parallel, i.e. RTE1&GStack1, RTE2&GStack2, GStack3):                                                                                    ")
+    print('  > python hanasitter.py -cf "M_SERVICE_THREADS,THREAD_STATE,Running,30,M_SERVICE_THREADS,THREAD_STATE,Semaphore Wait,20" -nr 2 -ng 3 -rm 3         ')
+    print("                                                                                                                                                    ")
+    print("EXAMPLE (if, on average from 3 checks with 5s interval, > 30 THREAD_STATE=Running, or if any column from the table VARINUM has been unloaded,       ")
+    print("         then record two call stacks)                                                                                                               ")    
+    print('  > python hanasitter.py -cf "M_SERVICE_THREADS,THREAD_STATE,Running,30,M_CS_UNLOADS,TABLE_NAME,VARINUM,1" -if 3,5,1,0 -nc 2                        ')
+    print("                                                                                                                                                    ")
+    print("EXAMPLE (Here a where clause is given, if more than 3 active indexserver threads runs longer than about 5 days (duration is in ms))                 ")    
+    print('''  > python hanasitter.py -cf "M_SERVICE_THREADS,WHERE,IS_ACTIVE='TRUE' and SERVICE_NAME='indexserver' and DURATION>420000000,3" -nc 2           ''')
+    print("                                                                                                                                                    ")
+    print("EXAMPLE (if average system CPU >95% or Ping > 30 seconds, 2 Call Stacks are recorded, or else it will try again after 120 seconds, after            ")
+    print("         recording it will sleep for one hour before it starts to track again):                                                                     ")                                                
+    print("  > python hanasitter.py -cpu 2,5,2,95 -pt 30 -ci 120 -nc 2 -ar 3600                                                                                ")
+    print("                                                                                                                                                    ")
+    print("EXAMPLE (if there are more then 10 threads from the Application user AUSER123 or from the DB user DUSER123 record 2 RTE dumps):                     ")
+    print('  > python hanasitter.py -cf "M_SERVICE_THREADS,APPLICATION_USER_NAME,AUSER123,10,M_SERVICE_THREADS,USER_NAME,DUSER123,10" -nr 2                    ')
+    print("                                                                                                                                                    ")
+    print("EXAMPLE (if there are more then 5 threads with a thread method that starts with PlanExecutor or with a thread type that                             ")
+    print("         includes Attribute or that is executed from any user starting with DUSER12, then 5 GStacks are recorded                                    ") 
+    print('  > python hanasitter.py -cf "M_SERVICE_THREADS,THREAD_METHOD,PlanExecutor*,5,M_SERVICE_THREADS,THREAD_TYPE,*Attribute*,5,M_SERVICE_THREADS,USER_NAME,DUSER12*,5" -ng 5 ')
+    print("                                                                                                                                                    ")
+    print("EXAMPLE (reads a configuration file, but one flag will overwrite what is in the configuration file, i.e. there will be 3 callstacks instead of 2):  ")
+    print("  > python hanasitter.py -ff /tmp/HANASitter/hanasitter_configfile.txt -nc 3                                                                        ")
+    print("    Where the config file could looks like this:                                                                                                    ")
+    print("                                  MY HANASITTER CONFIGURATION FILE                                                                                  ")
+    print("                                  If more than 20 threads is in state TREAD_STATE=Running                                                           ")
+    print('                                  -cf "M_SERVICE_THREADS,THREAD_STATE,Running,20"                                                                   ')
+    print("                                  then 2 call stacks                                                                                                ")
+    print("                                  -nc 2                                                                                                             ")
+    print("                                  with 30 seconds between them                                                                                      ")
+    print("                                  -ic 30                                                                                                            ")
+    print("                                  are recorded. This is the key in hdbuserstore that is used:                                                       ")
+    print("                                  -k SYSTEMKEY                                                                                                      ")
+    print("                                                                                                                                                    ")
+    print("CURRENT KNOWN LIMITATIONS (i.e. TODO LIST):                                                                                                         ")
+    print(" 1. Record in parallel for different Scale-Out Nodes   (should work for some recording types, e.g. RTE dumps -->  TODO)                             ")
+    print(" 2. If a CPU only happens on one Host, possible to record on only one Host                                                                          ")
+    print(" 3. CPU should be possible to be checked for BOTH system AND user --> TODO                                                                          ")
+    print(" 4. Let HANASitter first check that there is no other hanasitter process running --> refuse to run --> TODO  (but can be done with cron, see slides)")
+    print(" 5. Read config file, -ff, after hanasitter slept, so that it will allow dynamic changes                                                            ")
+    print(" 6. Make the PING check specific for HOSTS (and only record for that host) ... can be done with ROUTE_TO(<volume_id_1>, ..., <volume_id_n>)         ")
+    print("                                                                                                                                                    ")
+    print("AUTHOR: Christian Hansen                                                                                                                            ")
+    print("                                                                                                                                                    ")
+    print("                                                                                                                                                    ")
     os._exit(1)
     
 def printDisclaimer():
-    print("                                                                                                                                                                        ")    
-    print("ANY USAGE OF HANASITTER ASSUMES THAT YOU HAVE UNDERSTOOD AND AGREED THAT:                                                                                               ")
-    print(" 1. HANASitter is NOT SAP official software, so normal SAP support of HANASitter cannot be assumed                                					   ")
-    print(" 2. HANASitter is open source                                                                                                     					   ") 
-    print(' 3. HANASitter is provided "as is"                                                                                                					   ')
-    print(' 4. HANASitter is to be used on "your own risk"                                                                                   					   ')
-    print(" 5. HANASitter is a one-man's hobby (developed, maintained and supported only during non-working hours)                           					   ")
-    print(" 6  All HANASitter documentations have to be read and understood before any usage:                                                					   ")
-    print("     a) SAP Note 2399979                                                                                                          					   ")
-    print("     b) The .pdf file that can be downloaded at the bottom of SAP Note 2399979                                                    					   ")
-    print("     c) All output from executing                                                                                                 					   ")
-    print("                     python hanasitter.py --help                                                                                  					   ")
-    print(" 7. HANASitter can help you to automize certain monitoring tasks but is not an attempt to teach you how to monitor SAP HANA       					   ")
-    print("    I.e. if you do not know what you want to do, HANASitter cannot help, but if you do know, HANASitter can automitize it         					   ")
-    print(" 8. HANASitter is not providing any recommendations, all flags shown in the documentation (see point 6.) are only examples        					   ")
+    print("                                                                                                                                  ")    
+    print("ANY USAGE OF HANASITTER ASSUMES THAT YOU HAVE UNDERSTOOD AND AGREED THAT:                                                         ")
+    print(" 1. HANASitter is NOT SAP official software, so normal SAP support of HANASitter cannot be assumed                                ")
+    print(" 2. HANASitter is open source                                                                                                     ") 
+    print(' 3. HANASitter is provided "as is"                                                                                                ')
+    print(' 4. HANASitter is to be used on "your own risk"                                                                                   ')
+    print(" 5. HANASitter is a one-man's hobby (developed, maintained and supported only during non-working hours)                           ")
+    print(" 6  All HANASitter documentations have to be read and understood before any usage:                                                ")
+    print("     a) SAP Note 2399979                                                                                                          ")
+    print("     b) The .pdf file that can be downloaded at the bottom of SAP Note 2399979                                                    ")
+    print("     c) All output from executing                                                                                                 ")
+    print("                     python hanasitter.py --help                                                                                  ")
+    print(" 7. HANASitter can help you to automize certain monitoring tasks but is not an attempt to teach you how to monitor SAP HANA       ")
+    print("    I.e. if you do not know what you want to do, HANASitter cannot help, but if you do know, HANASitter can automitize it         ")
+    print(" 8. HANASitter is not providing any recommendations, all flags shown in the documentation (see point 6.) are only examples        ")
     os._exit(1)
 
 ############ GLOBAL VARIABLES ##############
 emailNotification = None
-slackNotification = None
-
-slackMessageTemplate1 ='''
-{
-    "attachments": [
-        		{
- 		           "fallback": "[<date>] Alert triggered for HANA <sid> - <hostname> : <prettyDescription>",
-	                   "pretext": "Alert triggered on <date>",
- 		           "title": "HANA <sid> - <hostname>",
-           		   "text": "Alert: <prettyDescription><details>",
-                           "color": "FF0000"
-                        }
-    		   ]
-}
-'''
-slackMessageTemplate ='''{"attachments": [{"fallback": "[<date>] Alert triggered for HANA <sid> - <hostname> : <prettyDescription>","pretext": "Alert triggered on <date>","title": "HANA <sid> - <hostname>","text": "Alert: <prettyDescription><details>","color": "FF0000"}]}'''
 
 ######################## DEFINE CLASSES ##################################
 class RTESetting:
@@ -247,16 +227,6 @@ class EmailNotification:
         self.SID = SID
     def printEmailNotification(self):
         print "Sender Email: ", self.senderEmail, " Reciever Email: ", self.recieverEmail, " Mail Server: ", self.mailServer 
-
-#@TODO
-class SlackNotification:
-    def __init__(self, WEBHOOK, SID, HOSTNAME):
-        self.WEBHOOK = WEBHOOK
-        self.SID = SID
-	self.HOSTNAME = HOSTNAME
-    def printSlackNotification(self):
-        print "Slack Webhook: ", self.WEBHOOK, " HANA SID: ", self.SID, " HOSTNAME: ", self.HOSTNAME
-
 
 #### Remember:
 #Nameserver port is always 3**01 and SQL port = 3**13 valid for,
@@ -346,11 +316,8 @@ class CommunicationManager:
         self.log_features = log_features     
         
 class CriticalFeature:
-    def __init__(self, view, feature, value, limit, onlyAlert = False, prettyDescription = "",  killSession = False):
-	#DEBUG
-	#print "{0}|{1}|{2}".format(value,onlyAlert,prettyDescription)
-	#END DEBUG
-	self.view = view
+    def __init__(self, view, feature, value, limit, killSession = False):
+        self.view = view
         self.feature = feature
         self.maxRepeat = None
         self.whereMode = (self.feature == 'WHERE')
@@ -385,14 +352,6 @@ class CriticalFeature:
             print "INPUT ERROR: 4th item of -cf must be either an integer or an integer preceded by < or >. Please see --help for more information."
             os._exit(1)
         self.limit = int(limit)
-	if not is_boolean(onlyAlert):
-	    print "INPUT ERROR: The optional 5th item of -cf must be a boolean. Please see --help for more information."
-	    os._exit(1)
-	self.onlyAlert = to_boolean(onlyAlert)
-	#DEBUG
-	#print "For value {0}, the self.onlyAlert: {1}".format(self.value, str(self.onlyAlert))
-	#END DEBUG
-	self.prettyDescription = prettyDescription
         self.killSession = killSession
         self.whereClauseDescription = self.whereClause
         if is_integer(self.maxRepeat):
@@ -492,18 +451,6 @@ def is_number(s):
     except ValueError:
         return False
 
-def is_boolean(s):
-    try:
-        return True if s.lower() in ['true','false','1','0'] else False
-    except ValueError:
-        return False
-
-def to_boolean(s):
-    try:
-        return True if s.lower() in ['true', '1'] else False
-    except ValueError:
-        return False
-
 def prio_def(prio_number):
     prios = {1:"RTE", 2:"Call Stacks", 3:"G-Stacks", 4:"Kernel Profiler"}
     return prios[prio_number]    
@@ -563,12 +510,8 @@ def cpu_too_high(cpu_check_params, comman):
     if int(cpu_check_params[0]) == 0 or int(cpu_check_params[1]) == 0 or int(cpu_check_params[3]) == 100: # if CPU type is 0 or if number CPU checks is 0 or allowed CPU is 100 then no CPU check
         return False
     start_time = datetime.now()
-    command_run = subprocess.check_output("sar -u "+cpu_check_params[1]+" "+cpu_check_params[2] +" | awk '/Average\:/'", shell=True)
+    command_run = subprocess.check_output("sar -u "+cpu_check_params[1]+" "+cpu_check_params[2], shell=True)
     sar_words = command_run.split()
-    #DEBUG
-    #print(sar_words)
-    
-    #DEBUG END
     cpu_column = 2 if int(cpu_check_params[0]) == 1 else 4
     current_cpu = sar_words[sar_words.index('Average:') + cpu_column]
     if not is_number(current_cpu):
@@ -579,7 +522,7 @@ def cpu_too_high(cpu_check_params, comman):
     stop_time = datetime.now()
     cpu_string = "User CPU Check  " if int(cpu_check_params[0]) == 1 else "System CPU Check"
     printout = cpu_string+"  , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , True         , "+str(not too_high_cpu)+"       , Av. CPU = "+current_cpu+" % (Allowed = "+cpu_check_params[3]+" %) "
-    log(printout, comman, sendEmail = too_high_cpu, sendSlackAlert = too_high_cpu)
+    log(printout, comman, sendEmail = too_high_cpu)
     return too_high_cpu
 
 def stop_session(cf, comman):
@@ -827,7 +770,7 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                 comment = "No response from DB within "+str(ping_timeout)+" seconds"
             else:
                 comment = "DB responded faster than "+str(ping_timeout)+" seconds"
-            log("Ping Check        , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          , "+str(not hanging and not offline)+"       , "+comment, comman, sendEmail = hanging or offline, sendSlackAlert = hanging or offline) 
+            log("Ping Check        , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          , "+str(not hanging and not offline)+"       , "+comment, comman, sendEmail = hanging or offline) 
             if hanging:
                 recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
             if offline:
@@ -850,18 +793,18 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                     if hanging:
                         info_message = "Hang situation during feature-check detected"
                         printout = "Feature Check "+str(chid)+"   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not hanging)+"       , "+info_message
-                        log(printout + " , " + cf.prettyDescription, comman, sendEmail = hanging, sendSlackAlert = hanging)
+                        log(printout, comman, sendEmail = hanging)
                     else: 
                         for host, nCFs  in nbrCFsPerHost[0].items():
                             wrong_number_critical_features = (cf.limitIsMinimumNumberCFAllowed and nCFs < cf.limit) or (not cf.limitIsMinimumNumberCFAllowed and nCFs > cf.limit)    
                             info_message = "# CFs = "+str(nCFs)+" for "+host+", "+cf.cfInfo
-                            printout = "Feature Check "+str(chid)+"   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not wrong_number_critical_features)+"      , "+info_message
-                            log(printout + " , , " + cf.prettyDescription, comman, sendEmail = wrong_number_critical_features, sendSlackAlert = wrong_number_critical_features)
+                            printout = "Feature Check "+str(chid)+"   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not wrong_number_critical_features)+"       , "+info_message
+                            log(printout, comman, sendEmail = wrong_number_critical_features)
                             if wrong_number_critical_features:
                                 hostsWithWrongNbrCFs.append(host)
                     if comman.log_features:
                         log(critical_feature_info[0], CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features), "criticalFeatures")
-                    if hanging or len(hostsWithWrongNbrCFs) or not cf.onlyAlert:
+                    if hanging or len(hostsWithWrongNbrCFs):
                         if cf.killSession:
                             stop_session(cf, comman)
                         if host_mode:
@@ -885,78 +828,23 @@ def cdalias(alias, local_dbinstance):   # alias e.g. cdtrace, cdhdb, ...
     path = path.replace("[0-9][0-9]", local_dbinstance) # if /bin/bash shows strange HDB[0-9][0-9] we force correct instance on it
     return path    
         
-def log(message, comman, file_name = "", sendEmail = False, sendSlackAlert = False):
-    #transform the message into a list for easier parsing
-    new_message = message.split(",")
-    #if len > 9 we are dealing with a Critical Feature. We don't want to show in the log the hanging (9) and prettyDescription (10) so we take it out.
-    print_log = ",".join(new_message[:-2] if len(new_message) > 9 else new_message)
+def log(message, comman, file_name = "", sendEmail = False):
     if comman.std_out:
-	print print_log
+        print message
     if file_name == "":
         file_name = "hanasitterlog"
     logfile = open(comman.out_dir+"/"+file_name+"_"+datetime.now().strftime("%Y-%m-%d"+".txt").replace(" ", "_"), "a")
-    logfile.write(print_log+"\n")
+    logfile.write(message+"\n")   
     logfile.flush()
     logfile.close()
-    global slackNotification
-    if sendSlackAlert and slackNotification:
-	#@TODO
-	print('> Sending slack alert to {3} from {0} - {1}  with text: {2}'.format(slackNotification.SID, slackNotification.HOSTNAME, message, slackNotification.WEBHOOK))
-	processSlackAlert(new_message, slackNotification.SID, slackNotification.HOSTNAME, slackNotification.WEBHOOK)
     global emailNotification
     if sendEmail and emailNotification:  #sends email IF this call of log() wants it AND IF -en flag has been specified        
         #MAILX (https://www.systutorials.com/5167/sending-email-using-mailx-in-linux-through-internal-smtp/):
         mailstring = 'echo "'+message+'" | mailx -s "Message from HANASitter about '+emailNotification.SID+'" -S smtp=smtp://'+emailNotification.mailServer+' -S from="'+emailNotification.senderEmail+'" '+emailNotification.recieverEmail
         #print mailstring
         output = subprocess.check_output(mailstring, shell=True)
-	
 
 #ADDED#######################################################################################################################################################
-
-#
-#    "attachments": [
-#        		{
-# 		           "fallback": "[date Alert triggered for HANA <sid> - <hostname> : <prettyDescription>",
-#	                   "pretext": "Alert triggered on <date>",
-# 		           "title": "HANA <sid> - <hostname>",
-#           		   "text": "Alert: <prettyDescription>\nDetail: <details>",
-#                           "color": "FF0000"
-#                        }
-#    		   ]
-
-
-
-def processSlackAlert(message, SID, HOSTNAME, WEBHOOK):
-    #build message
-
-    #DEBUG	
-    print message
-    print len(message)
-    #END DEBUG
-
-    message_template = slackMessageTemplate.replace('<date>', message[1].strip())
-    message_template = message_template.replace('<sid>',SID)
-    message_template = message_template.replace('<hostname>',HOSTNAME)
-    build_details = ""
-    if("CPU" in message[0]):
-	build_details_description = message[0].strip()
-	build_details = "\\nDetails: " + message[5].strip()
-    else:
-	build_details_description = message[9].strip() if len(message) > 9 else message[5].strip() + "," + message[6].strip() + "," + message[7].strip() 
-	build_details =  "\\nDetails: "+ message[5].strip() + "," + message[6].strip() + "," + message[7].strip() if len(message) > 8 else ""
-   	
-    message_template = message_template.replace('<prettyDescription>', build_details_description)
-    message_template = message_template.replace('<details>', build_details)
-
-    #print message_template
-
-    slack_command = "curl -X POST -H 'Content-type: application/json' --data '" +  message_template + "' " + WEBHOOK
-    print slack_command
-    command_run = subprocess.check_output(slack_command,shell=True)
-    print command_run
-    os._exit(1)
-
-
 def zip_files(list_of_filenames, zip_filename, mode, comman):
     files_to_zip = []
     zipped_file_list = []
@@ -1126,7 +1014,6 @@ def main():
     flag_file = ""    #default: no configuration input file
     log_features = "false"
     email_notification = None
-    slack_notification = None
     ssl = "false"
     virtual_local_host = "" #default: assume physical local host
     dbuserkey = 'SYSTEMKEY' # This KEY has to be maintained in hdbuserstore  
@@ -1226,8 +1113,6 @@ def main():
                         log_features = flagValue
                     if firstWord == '-en': 
                         email_notification = [x for x in flagValue.split(',')]
-                    if firstWord == '-sn': 
-                        slack_notification = [x for x in flagValue.split(',')]
                     if firstWord == '-so': 
                         std_out = flagValue
                     if firstWord == '-ssl': 
@@ -1312,8 +1197,6 @@ def main():
         std_out = int(sys.argv[sys.argv.index('-so') + 1])
     if '-en' in sys.argv:
         email_notification = [x for x in sys.argv[  sys.argv.index('-en') + 1   ].split(',')] 
-    if '-sn' in sys.argv:
-        slack_notification = [x for x in sys.argv[  sys.argv.index('-sn') + 1   ].split(',')] 
     if '-ssl' in sys.argv:
         ssl = sys.argv[sys.argv.index('-ssl') + 1]
     if '-vlh' in sys.argv:
@@ -1567,11 +1450,11 @@ def main():
         os._exit(1)
     minRetainedLogDays = int(minRetainedLogDays)
     ### critical_features, -cf
-    if len(critical_features)%6: # this also allow empty list in case just only ping check without feature check; -cf ""
-        log("INPUT ERROR: -cf must be a list with the length of multiple of 6. Please see --help for more information.", comman)
+    if len(critical_features)%4: # this also allow empty list in case just only ping check without feature check; -cf ""
+        log("INPUT ERROR: -cf must be a list with the length of multiple of 4. Please see --help for more information.", comman)
         os._exit(1)
-    critical_features = [critical_features[i*6:i*6+6] for i in range(len(critical_features)/6)]
-    critical_features = [CriticalFeature(cf[0], cf[1], cf[2], cf[3], cf[4], cf[5]) for cf in critical_features] #testing cf[3] is done in the class
+    critical_features = [critical_features[i*4:i*4+4] for i in range(len(critical_features)/4)]
+    critical_features = [CriticalFeature(cf[0], cf[1], cf[2], cf[3]) for cf in critical_features] #testing cf[3] is done in the class
     ### kill_session, -ks
     if kill_session:
         if not len(kill_session) == len(critical_features):
@@ -1638,19 +1521,6 @@ def main():
         global emailNotification
         emailNotification = EmailNotification(email_notification[0], email_notification[1], email_notification[2], SID)
 
-    ### slack_notification, -sn
-    if slack_notification:
-        if not len(slack_notification) == 1:
-            log("INPUT ERROR: -sn requires 1 element. Please see --help for more information.", comman)
-            os._exit(1)
-        #if not is_email(email_notification[0]) or not is_email(email_notification[1]):
-        #    log("INPUT ERROR: first and second element of -sn have to be valid emails. Please see --help for more information.", comman)
-        #    os._exit(1)
-    
-    ############# SLACK NOTIFICATION ##############
-    if slack_notification:
-	global slackNotification
-        slackNotification = SlackNotification(slack_notification[0], SID, str(local_host))
     ### FILL HDBCONS STRINGS ###
     hdbcons = HDBCONS(local_host, used_hosts, local_dbinstance, is_mdc, is_tenant, communicationPort, SID, rte_mode, tenantDBName)
 
@@ -1678,8 +1548,7 @@ def main():
     chid = 0
     for cf in critical_features:
         chid += 1
-        printout = "[Alert Only] " if cf.onlyAlert else ""
-	printout += "Feature Check "+str(chid)
+        printout = "Feature Check "+str(chid)
         if cf.limitIsMinimumNumberCFAllowed:
             printout += " requires at least "+str(cf.limit)+" times that "+cf.whereClauseDescription
         else:
