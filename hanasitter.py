@@ -118,6 +118,16 @@ def printHelp():
     print("             Note: requires flags '-hda_jpath' and '-hda_path' to be setup properly.                                                                    ")
     print(" -hda_jpath  Path to the java binary (ex. (...)/sapjvm_8/bin/java). Not set by default.                                                                 ")
     print(" -hda_path   Path to the HANADumpAnalyzer jar file (ex. /usr/sap/<SID>/HDB<INSTANCE>/HANADumpAnalyzer.jar). Not set by default.                         ")
+    print(" -sn         Slack Webhook for slack integration                                                                                                        ")
+    print(' -af         list of alert features surrounded by two "s; the -af flag has two modes, 1. One Column Mode and 2. Where Clause Mode                       ')
+    print("             1. One Column Mode: any sys.m_* view, a column in that view, the column value (wildcards, *, before and/or after are possible) and         ")
+    print("                max number allowed feature occations, i.e.                                                                                              ")
+    print('                "<m_view 1>,<feature 1>,<[*]value 1[*]>,<limit 1>,...,<m_view N>,<feature N>,<[*]value N[*]>,<limit N>"                                 ')
+    print("             2. Where Clause Mode: any sys.m_* view, the keyword 'WHERE', the where clause and max number allowed feature occations, i.e.               ")
+    print('                "<m_view 1>,WHERE,<where clause 1>,<limit 1>,...,<m_view N>,WHERE,<where clause N>,<limit N>"                                           ')
+    print('             default: ""                                                                                                                                ')
+    print('             Note: <limit> should be an integer, or an integer preceded by < (for maximum allowed) or > (for minumum allowed)                           ')
+    print('             Note: If you need a , in an alert feature, please use \c instead, e.g. add_seconds(BLOCKED_TIME\c600)                                      ')
     #ADDED#######################################################################################################################################################
     print("                                                                                                                                                    ")
     print("EXAMPLE (if > 20 THREAD_STATE=Running, or > 30 THREAD_STATE=Semaphore Wait are found 2 RTE dumps and 3 GStacks will be recorded                     ")
@@ -189,6 +199,25 @@ def printDisclaimer():
 ############ GLOBAL VARIABLES ##############
 emailNotification = None
 
+#- Slack alerting integration - 
+slackNotification = None
+#Template for Slack alert
+'''
+{
+    "attachments": [
+                {
+                   "fallback": "[<date>] Alert triggered for HANA <sid> - <hostname> : <prettyDescription>",
+                       "pretext": "Alert triggered on <date>",
+                   "title": "HANA <sid> - <hostname>",
+                   "text": "Alert: <prettyDescription><details>",
+                           "color": "FF0000"
+                        }
+               ]
+}
+'''
+slackMessageTemplate ='''{"attachments": [{"fallback": "[<date>] Alert triggered for HANA <sid> - <hostname> : <prettyDescription>","pretext": "Alert triggered on <date>","title": "HANA <sid> - <hostname>","text": "Alert: <prettyDescription><details>","color": "FF0000"}]}'''
+#- End Slack alerting integration - 
+
 ######################## DEFINE CLASSES ##################################
 class RTESetting:
     def __init__(self, num_rtedumps, rtedumps_interval, zip_mode, hda_enable, hda_jpath, hda_path):
@@ -226,7 +255,18 @@ class EmailNotification:
         #self.timeout = timeout
         self.SID = SID
     def printEmailNotification(self):
-        print "Sender Email: ", self.senderEmail, " Reciever Email: ", self.recieverEmail, " Mail Server: ", self.mailServer 
+        print("Sender Email: ", self.senderEmail, " Reciever Email: ", self.recieverEmail, " Mail Server: ", self.mailServer)
+
+#- Slack alerting integration - 
+class SlackNotification:
+    def __init__(self, webhook, sid, hostname):
+        self.webhook = webhook
+        self.sid = sid
+        self.hostname = hostname
+    def printSlackNotification(self):
+        print("Slack Webhook: ", self.webhook, " HANA SID: ", self.sid, " HOSTNAME: ", self.hostname)
+#- End Slack alerting integration -
+
 
 #### Remember:
 #Nameserver port is always 3**01 and SQL port = 3**13 valid for,
@@ -368,6 +408,58 @@ class CriticalFeature:
         self.nbrIterations = iterations
         self.interval = interval
         
+#- Slack alerting integration - 
+
+class AlertFeature:
+    def __init__(self, view, feature, value, limit, delay_between_alerts):
+        self.view = view
+        self.feature = feature
+        self.maxRepeat = None
+        self.whereMode = (self.feature == 'WHERE')
+        if self.whereMode:
+            self.whereClause = value.replace('\c',',')  # in case , wants to be used in where clause, e.g. CURRENT_TIMESTAMP>=add_seconds(BLOCKED_TIME,600)
+        else:
+            # IF THERE IS A > THEN TRY TO SPLIT TO A MAX_REPEAT AND A VALUE
+            if '>' in value: # to find string before > X number times where X is the integer after >
+                self.maxRepeat = value.rsplit('>',1)[1] #rsplit allows other >s in the value
+                if is_integer(self.maxRepeat):          #if not, then this > was not intended for repeat 
+                    value = value.rsplit('>',1)[0]      #where-clause to find rows where the column 'feature' contains the string 'value' more than 'maxRepeat' times
+                    self.whereClause = "length("+feature+") - length(replace("+feature+", '"+value+"', '')) > "+str(int(self.maxRepeat)*len(value))
+            # IF NOT MANAGED TO SPLIT THEN FIRST CORRECT WILDCARDS AND THEN CREATE THE WHERE CLAUSE
+            if not is_integer(self.maxRepeat):  
+                if value[0] == '*' and value[-1] == '*':   #wildcards, "*", before and after
+                    value = "'%"+value[1:-1]+"%'"
+                elif value[0] == '*':                      #wildcard,  "*", before
+                    value = "'%"+value[1:]+"'"
+                elif value[-1] == '*':                     #wildcard,  "*", after
+                    value = "'"+value[:-1]+"%'"
+                else:
+                    value = "'"+value+"'"
+                if value[1] == '%' or value[-1] == '%':
+                    self.whereClause = feature + " like " + value   #where-clause with wildcard(s)
+                else:
+                    self.whereClause = feature + " = " + value      #where-clause without wildcard(s)     
+        self.value = value
+        self.limitIsMinimumNumberCFAllowed = (limit[0] == '>') # so default and < then maximum number CF allowed 
+        if limit[0] in ['<', '>']:
+            limit = limit[1:]
+        if not is_integer(limit):
+            print "INPUT ERROR: 4th item of -af must be either an integer or an integer preceded by < or >. Please see --help for more information."
+            os._exit(1)
+        self.limit = int(limit)
+        if not is_integer(delay_between_alerts):
+            print "INPUT ERROR: 5th item of -af must be either an integer. Please see --help for more information."
+        self.delay_between_alerts = delay_between_alerts
+        self.whereClauseDescription = self.whereClause
+        if is_integer(self.maxRepeat):
+            self.whereClauseDescription = "column "+self.feature+" in "+self.view+" contains the string "+self.value+" more than "+self.maxRepeat+" times"
+        if self.limitIsMinimumNumberCFAllowed:
+            self.afInfo = "min required = "+str(self.limit)+", check: "+self.whereClauseDescription
+        else:
+            self.afInfo = "max allowed = "+str(self.limit)+", check: "+self.whereClauseDescription
+
+#- End Slack alerting integration - 
+
 ######################## DEFINE FUNCTIONS ################################
 
 def is_integer(s):
@@ -510,7 +602,7 @@ def cpu_too_high(cpu_check_params, comman):
     if int(cpu_check_params[0]) == 0 or int(cpu_check_params[1]) == 0 or int(cpu_check_params[3]) == 100: # if CPU type is 0 or if number CPU checks is 0 or allowed CPU is 100 then no CPU check
         return False
     start_time = datetime.now()
-    command_run = subprocess.check_output("sar -u "+cpu_check_params[1]+" "+cpu_check_params[2], shell=True)
+    command_run = subprocess.check_output("sar -u "+cpu_check_params[1]+" "+cpu_check_params[2] + r" | awk '/Average\:/'", shell=True)
     sar_words = command_run.split()
     cpu_column = 2 if int(cpu_check_params[0]) == 1 else 4
     current_cpu = sar_words[sar_words.index('Average:') + cpu_column]
@@ -675,7 +767,7 @@ def record_rtedump(rte, hdbcons, comman):
                     files_to_zip.append(hanadump_analysis_location)
                 zip_filename = "{0}/{1}_{2}_{3}{4}{5}.zip".format(comman.out_dir, host, hdbcons.SID, tenantDBString, gen_date, get_timezone)
                 #print('Zip Name:' +zip_filename)
-                zip_files(files_to_zip, zip_filename, rte.zip_mode, comman)
+                zipFiles(files_to_zip, zip_filename, rte.zip_mode, comman)
                 printout = "> Zip procedure: "+ datetime.now().strftime("%Y-%m-%d %H:%M:%S") + " - Zipped contents" + (" and deleted original file(s)" if rte.zip_mode == 'delete' else " ") +  ", File location: " + zip_filename
                 log(printout, comman)
             #ADDED#######################################################################################################################################################
@@ -845,7 +937,42 @@ def log(message, comman, file_name = "", sendEmail = False):
         output = subprocess.check_output(mailstring, shell=True)
 
 #ADDED#######################################################################################################################################################
-def zip_files(list_of_filenames, zip_filename, mode, comman):
+
+#- Slack alerting integration - 
+def processSlackAlert(message, SID, HOSTNAME, WEBHOOK):
+    #build message
+
+    #DEBUG  
+    print message
+    print len(message)
+    #END DEBUG
+
+    message_template = slackMessageTemplate.replace('<date>', message[1].strip())
+    message_template = message_template.replace('<sid>',SID)
+    message_template = message_template.replace('<hostname>',HOSTNAME)
+    build_details = ""
+
+    if("CPU" in message[0]):
+        build_details_description = message[0].strip()
+        build_details = "\\nDetails: " + message[5].strip()
+    else:
+        build_details_description = message[9].strip() if len(message) > 9 else message[5].strip() + "," + message[6].strip() + "," + message[7].strip() 
+        build_details =  "\\nDetails: "+ message[5].strip() + "," + message[6].strip() + "," + message[7].strip() if len(message) > 8 else ""
+    
+    message_template = message_template.replace('<prettyDescription>', build_details_description)
+    message_template = message_template.replace('<details>', build_details)
+
+    #print message_template
+
+    slack_command = "curl -X POST -H 'Content-type: application/json' --data '" +  message_template + "' " + WEBHOOK
+    print slack_command
+    command_run = subprocess.check_output(slack_command,shell=True)
+    print command_run
+    os._exit(1)
+
+#- End Slack alerting integration - 
+
+def zipFiles(list_of_filenames, zip_filename, mode, comman):
     files_to_zip = []
     zipped_file_list = []
     for filename in list_of_filenames:
@@ -1586,6 +1713,12 @@ def main():
             hdbcons.create_temp_output_directories() #create temporary output folders
         while True: 
             if is_online(local_dbinstance, comman) and not is_secondary(comman):
+
+                ############################################################################
+                ## INSERT LOGIC FOR ALERT HERE
+                ############################################################################
+                SSSSSSSSSS @TODO
+
                 [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, host_mode, comman, hdbcons)
                 if recorded:
                     if after_recorded < 0: #if after_recorded is negative we want to exit after a recording
