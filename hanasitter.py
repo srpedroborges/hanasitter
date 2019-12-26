@@ -210,12 +210,12 @@ slackNotification = None
                        "pretext": "Alert triggered on <date>",
                    "title": "HANA <sid> - <hostname>",
                    "text": "Alert: <prettyDescription><details>",
-                           "color": "FF0000"
-                        }
-               ]
+                           "color": <color>
+                }
+                    ]
 }
 '''
-slackMessageTemplate ='''{"attachments": [{"fallback": "[<date>] Alert triggered for HANA <sid> - <hostname> : <prettyDescription>","pretext": "Alert triggered on <date>","title": "HANA <sid> - <hostname>","text": "Alert: <prettyDescription><details>","color": "FF0000"}]}'''
+slackMessageTemplate ='''{"attachments": [{"fallback": "[<date>] Alert triggered for HANA <sid> - <hostname> : <prettyDescription>","pretext": "Alert triggered on <date>","title": "HANA <sid> - <hostname>","text": "Alert: <prettyDescription><details>","color": "<color>"}]}'''
 #- End Slack alerting integration - 
 
 ######################## DEFINE CLASSES ##################################
@@ -263,8 +263,12 @@ class SlackNotification:
         self.webhook = webhook
         self.sid = sid
         self.hostname = hostname
+    def alertColor(self):
+	return "FF0000"
+    def okColor(self):
+	return "00FF00"
     def printSlackNotification(self):
-        print("Slack Webhook: ", self.webhook, " HANA SID: ", self.sid, " HOSTNAME: ", self.hostname)
+        print("Slack Webhook: ", self.webhook, " HANA SID: ", self.sid, " Hostname: ", self.hostname)
 #- End Slack alerting integration -
 
 
@@ -411,8 +415,9 @@ class CriticalFeature:
 #- Slack alerting integration - 
 
 class AlertFeature:
-    def __init__(self, view, feature, value, limit, delay_between_alerts):
-        self.view = view
+    def __init__(self, name, view, feature, value, limit, triggered):
+        self.name = name
+	self.view = view
         self.feature = feature
         self.maxRepeat = None
         self.whereMode = (self.feature == 'WHERE')
@@ -439,17 +444,14 @@ class AlertFeature:
                     self.whereClause = feature + " like " + value   #where-clause with wildcard(s)
                 else:
                     self.whereClause = feature + " = " + value      #where-clause without wildcard(s)     
-        self.value = value
+	self.value = value
         self.limitIsMinimumNumberCFAllowed = (limit[0] == '>') # so default and < then maximum number CF allowed 
         if limit[0] in ['<', '>']:
             limit = limit[1:]
         if not is_integer(limit):
-            print "INPUT ERROR: 4th item of -af must be either an integer or an integer preceded by < or >. Please see --help for more information."
+            print "INPUT ERROR: 5th item of -af must be either an integer or an integer preceded by < or >. Please see --help for more information."
             os._exit(1)
         self.limit = int(limit)
-        if not is_integer(delay_between_alerts):
-            print "INPUT ERROR: 5th item of -af must be either an integer. Please see --help for more information."
-        self.delay_between_alerts = delay_between_alerts
         self.whereClauseDescription = self.whereClause
         if is_integer(self.maxRepeat):
             self.whereClauseDescription = "column "+self.feature+" in "+self.view+" contains the string "+self.value+" more than "+self.maxRepeat+" times"
@@ -457,6 +459,14 @@ class AlertFeature:
             self.afInfo = "min required = "+str(self.limit)+", check: "+self.whereClauseDescription
         else:
             self.afInfo = "max allowed = "+str(self.limit)+", check: "+self.whereClauseDescription
+        self.triggered = 0
+	def isTriggered(self):
+	    return True if 1 else False
+	def setTriggered(triggered):
+	    if is_integer(triggered):
+		self.triggered = triggered
+	    else:
+		self.triggered = -1
 
 #- End Slack alerting integration - 
 
@@ -939,7 +949,7 @@ def log(message, comman, file_name = "", sendEmail = False):
 #ADDED#######################################################################################################################################################
 
 #- Slack alerting integration - 
-def processSlackAlert(message, SID, HOSTNAME, WEBHOOK):
+def processSlackAlert(message, sid, hostname, webhook, alertColor):
     #build message
 
     #DEBUG  
@@ -948,8 +958,9 @@ def processSlackAlert(message, SID, HOSTNAME, WEBHOOK):
     #END DEBUG
 
     message_template = slackMessageTemplate.replace('<date>', message[1].strip())
-    message_template = message_template.replace('<sid>',SID)
-    message_template = message_template.replace('<hostname>',HOSTNAME)
+    message_template = message_template.replace('<sid>',sid)
+    message_template = message_template.replace('<hostname>',hostname)
+    message_template = message_template.replace('<color>',alertColor)
     build_details = ""
 
     if("CPU" in message[0]):
@@ -964,7 +975,7 @@ def processSlackAlert(message, SID, HOSTNAME, WEBHOOK):
 
     #print message_template
 
-    slack_command = "curl -X POST -H 'Content-type: application/json' --data '" +  message_template + "' " + WEBHOOK
+    slack_command = "curl -X POST -H 'Content-type: application/json' --data '" +  message_template + "' " + webhook
     print slack_command
     command_run = subprocess.check_output(slack_command,shell=True)
     print command_run
@@ -1130,6 +1141,7 @@ def main():
     kprofs_duration = 60 #seconds
     kprofs_wait = 0 #milliseconds
     feature_check_timeout = 60 #seconds
+    alert_features = []
     #critical_features = ['M_SERVICE_THREADS','IS_ACTIVE','TRUE','30']  #one critical feature state with max allowed 30
     critical_features = [] # default: don't use critical feature check
     kill_session = [] # default: do not kill any session
@@ -1140,6 +1152,7 @@ def main():
     minRetainedLogDays = -1 #automatic cleanup of hanasitterlog
     flag_file = ""    #default: no configuration input file
     log_features = "false"
+    slack_notification = None
     email_notification = None
     ssl = "false"
     virtual_local_host = "" #default: assume physical local host
@@ -1224,6 +1237,8 @@ def main():
                         kprofs_duration = flagValue
                     if firstWord == '-wp': 
                         kprofs_wait = flagValue
+                    if firstWord == '-af': 
+                        alert_features = [x.strip('"') for x in flagValue.split(',')]
                     if firstWord == '-cf': 
                         critical_features = [x.strip('"') for x in flagValue.split(',')]
                     if firstWord == '-if': 
@@ -1265,6 +1280,8 @@ def main():
                         mail_to = flagValue
                     if firstWord == '-smtp':
                         smtp = flagValue
+                    if firstWord == '-sn':
+                        slack_notification = flagValue
     #########################################################################################################################################
 
     #####################   INPUT ARGUMENTS (these would overwrite whats in the configuration file)  ####################     
@@ -1304,6 +1321,10 @@ def main():
         kprofs_duration = sys.argv[sys.argv.index('-dp') + 1]
     if '-wp' in sys.argv:
         kprofs_wait = sys.argv[sys.argv.index('-wp') + 1]
+    if '-af' in sys.argv:
+        alert_features = [x.strip('"') for x in sys.argv[  sys.argv.index('-af') + 1   ].split(',')] 
+        if alert_features == ['']:   # allow no critical feature with -cf ""
+            alert_features = []      # make the length 0 in case of -cf ""
     if '-cf' in sys.argv:
         critical_features = [x.strip('"') for x in sys.argv[  sys.argv.index('-cf') + 1   ].split(',')] 
         if critical_features == ['']:   # allow no critical feature with -cf ""
@@ -1347,6 +1368,8 @@ def main():
         mail_to = sys.argv[sys.argv.index('-mto') + 1]
     if '-smtp' in sys.argv:
         smtp = sys.argv[sys.argv.index('-smtp') + 1]
+    if '-sn' in sys.argv:
+        slack_notification = sys.argv[sys.argv.index('-sn') + 1]
     #ADDED#######################################################################################################################################################
  
     ############ GET LOCAL HOST, LOCAL SQL PORT, LOCAL INSTANCE and SID ##########
@@ -1576,6 +1599,12 @@ def main():
         log("INPUT ERROR: -or must be an integer. Please see --help for more information.", comman)
         os._exit(1)
     minRetainedLogDays = int(minRetainedLogDays)
+    ### alert_features, -af
+    if len(alert_features)%5: # this also allow empty list in case just only ping check without feature check; -cf ""
+        log("INPUT ERROR: -af must be a list with the length of multiple of 5. Please see --help for more information.", comman)
+        os._exit(1)
+    alert_features = [alert_features[i*5:i*5+5] for i in range(len(alert_features)/5)]
+    alert_features = [AlertFeature(af[0], af[1], af[2], af[3], af[4], 0) for af in alert_features] #testing af[4] is done in the class; last 0 is for triggered (means not triggered)
     ### critical_features, -cf
     if len(critical_features)%4: # this also allow empty list in case just only ping check without feature check; -cf ""
         log("INPUT ERROR: -cf must be a list with the length of multiple of 4. Please see --help for more information.", comman)
@@ -1647,6 +1676,22 @@ def main():
     if email_notification:
         global emailNotification
         emailNotification = EmailNotification(email_notification[0], email_notification[1], email_notification[2], SID)
+    
+    ### slack_notification, -sn
+    ### Webhook follows the this format: https://hooks.slack.com/services/XXXXXXXXX/XXXXXXXXX/XXXXXXXXXXX
+    if slack_notification:
+	if "https://hooks.slack.com/services/" not in slack_notification:
+            log("INPUT ERROR: -sn requires a valid webhook URL (incorrect domain). Please see --help for more information.", comman)
+            os._exit(1)
+	count_number_of_slashes = slack_notification.count("/")
+        if count_number_of_slashes != 6 : # a valid webhook url contains a total of 6 slashes
+            log("INPUT ERROR: -sn requires a valid webhook URL (incorrect number of /). Please see --help for more information.", comman)
+            os._exit(1)
+
+    ############# EMAIL NOTIFICATION ##############
+    if slack_notification:
+        global slackNotification
+        slackNotification = SlackNotification(slack_notification, SID, local_host)
 
     ### FILL HDBCONS STRINGS ###
     hdbcons = HDBCONS(local_host, used_hosts, local_dbinstance, is_mdc, is_tenant, communicationPort, SID, rte_mode, tenantDBName)
@@ -1669,19 +1714,31 @@ def main():
     log(printout, comman)       
     log("Online, Primary and Not-Secondary Check: Interval = "+str(online_test_interval)+" seconds", comman)
     log("Ping Check: Interval = "+str(check_interval)+" seconds, Timeout = "+str(ping_timeout)+" seconds", comman)
+    log("Alert Checks: Interval "+str(check_interval)+" seconds, Timeout = "+str(feature_check_timeout)+" seconds", comman)
     log("Feature Checks: Interval "+str(check_interval)+" seconds, Timeout = "+str(feature_check_timeout)+" seconds", comman)
+    if(slackNotification):
+      log("Slack Notification: Enabled", comman)
     if host_mode:
         log("Host Mode: Yes, i.e. all critical features below is PER HOST, and recording is done only for those hosts where a critical feature was found crossing allowed limit", comman)
+    chid = 0
+    for af in alert_features:
+        chid += 1
+        printout = "Alert Check "+str(chid)  + " - " + str(af.name) + " =>" 
+        if af.limitIsMinimumNumberCFAllowed:
+            printout += " requires at least '"+str(af.limit)+"' times that '"+str(af.whereClauseDescription).strip()+"'"
+        else:
+            printout += " allows only '"+str(af.limit)+"' times that '"+str(af.whereClauseDescription).strip()+"'"
+        log(printout, comman)
     chid = 0
     for cf in critical_features:
         chid += 1
         printout = "Feature Check "+str(chid)
         if cf.limitIsMinimumNumberCFAllowed:
-            printout += " requires at least "+str(cf.limit)+" times that "+cf.whereClauseDescription
+            printout += " requires at least '"+str(cf.limit)+"' times that '"+cf.whereClauseDescription+"'"
         else:
-            printout += " allows only "+str(cf.limit)+" times that "+cf.whereClauseDescription
+            printout += " allows only '"+str(cf.limit)+"' times that '"+cf.whereClauseDescription+"'"
         if cf.nbrIterations > 1:
-            printout += " as an average from "+str(cf.nbrIterations)+" checks with "+str(cf.interval)+" seconds intervals" 
+            printout += " as an average from '"+str(cf.nbrIterations)+"' checks with '"+str(cf.interval)+"' seconds intervals" 
         log(printout, comman)
     if log_features:
         log("All information for all features that are in one of the above critical feature states is recorded in the "+comman.out_dir+"/criticalFeatures log", comman)
@@ -1717,7 +1774,7 @@ def main():
                 ############################################################################
                 ## INSERT LOGIC FOR ALERT HERE
                 ############################################################################
-                SSSSSSSSSS @TODO
+                #SSSSSSSSSS @TODO
 
                 [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, host_mode, comman, hdbcons)
                 if recorded:
