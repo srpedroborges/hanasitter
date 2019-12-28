@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from datetime import datetime
+from datetime import datetime, timedelta
 from threading import Timer
 import sys, time, os, subprocess
 from multiprocessing import Pool
@@ -415,7 +415,7 @@ class CriticalFeature:
 #- Slack alerting integration - 
 
 class AlertFeature:
-    def __init__(self, name, view, feature, value, limit, triggered):
+    def __init__(self, view, feature, value, limit, name, triggered):
         self.name = name
 	self.view = view
         self.feature = feature
@@ -445,24 +445,29 @@ class AlertFeature:
                 else:
                     self.whereClause = feature + " = " + value      #where-clause without wildcard(s)     
 	self.value = value
-        self.limitIsMinimumNumberCFAllowed = (limit[0] == '>') # so default and < then maximum number CF allowed 
+        self.limitIsMinimumNumberAFAllowed = (limit[0] == '>') # so default and < then maximum number CF allowed 
         if limit[0] in ['<', '>']:
             limit = limit[1:]
         if not is_integer(limit):
-            print "INPUT ERROR: 5th item of -af must be either an integer or an integer preceded by < or >. Please see --help for more information."
+            print "INPUT ERROR: 4th item of -af must be either an integer or an integer preceded by < or >. Please see --help for more information."
             os._exit(1)
         self.limit = int(limit)
         self.whereClauseDescription = self.whereClause
         if is_integer(self.maxRepeat):
             self.whereClauseDescription = "column "+self.feature+" in "+self.view+" contains the string "+self.value+" more than "+self.maxRepeat+" times"
-        if self.limitIsMinimumNumberCFAllowed:
-            self.afInfo = "min required = "+str(self.limit)+", check: "+self.whereClauseDescription
+        if self.limitIsMinimumNumberAFAllowed:
+            self.afInfo = "min required = "+str(self.limit)+", view: " + self.view + ", check: "+self.whereClauseDescription
         else:
-            self.afInfo = "max allowed = "+str(self.limit)+", check: "+self.whereClauseDescription
+            self.afInfo = "max allowed = "+str(self.limit)+", view: " + self.view + ", check: "+self.whereClauseDescription
         self.triggered = 0
+        self.nbrIterations = 1
+        self.interval = 0 #[s]
+    	def setIterations(self, iterations, interval):
+            self.nbrIterations = iterations
+            self.interval = interval
 	def isTriggered(self):
 	    return True if 1 else False
-	def setTriggered(triggered):
+	def setTriggered(self, triggered):
 	    if is_integer(triggered):
 		self.triggered = triggered
 	    else:
@@ -638,48 +643,49 @@ def stop_session(cf, comman):
             printout = "Will disconnect session "+connId+" due to the check: "+cf.whereClauseDescription
             log(printout, comman)
             subprocess.check_output(comman.hdbsql_string+""" -j -A -U """+comman.dbuserkey+""" "ALTER SYSTEM DISCONNECT SESSION '"""+connId+"""'" """, shell=True)
-        
 
-def feature_check(cf, nbrCFsPerHost, critical_feature_info, host_mode, comman):   # cf = critical_feature, # comman = communication manager
+
+
+def feature_check(item, nbrCFsPerHost, critical_feature_info, host_mode, comman):   # cf = critical_feature, # comman = communication manager
     #CHECKS
-    viewExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitors where view_name = '"+cf.view+"'\"", shell=True).strip(' '))
+    viewExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitors where view_name = '"+item.view+"'\"", shell=True).strip(' '))
     if not viewExists:
-        log("INPUT ERROR, the view given as first entry in the -cf flag, ", cf.view, ", does not exist. Please see --help for more information.", comman)
+        log("INPUT ERROR, the view given as first entry in the -cf/-af flag, ", item.view, ", does not exist. Please see --help for more information.", comman)
         os._exit(1)
-    if not cf.whereMode:
-        columnExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where view_name = '"+cf.view+"' and view_column_name = '"+cf.feature+"'\"", shell=True).strip(' ')) 
+    if not item.whereMode:
+        columnExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where view_name = '"+item.view+"' and view_column_name = '"+item.feature+"'\"", shell=True).strip(' ')) 
         if not columnExists:
-            log("INPUT ERROR, the view ", cf.view, " does not have the column ", cf.feature, ". Please see --help for more information.", comman)
+            log("INPUT ERROR, the view ", item.view, " does not have the column ", item.feature, ". Please see --help for more information.", comman)
             os._exit(1)
     if host_mode:
-        hostColumnExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where view_name = '"+cf.view+"' and view_column_name = 'HOST'\"", shell=True).strip(' ')) 
+        hostColumnExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where view_name = '"+item.view+"' and view_column_name = 'HOST'\"", shell=True).strip(' ')) 
         if not hostColumnExists:
-            log("INPUT ERROR, you have specified host mode with -hf, but the view ", cf.view, " does not have a HOST column. Please see --help for more information.", comman)
+            log("INPUT ERROR, you have specified host mode with -hf, but the view ", item.view, " does not have a HOST column. Please see --help for more information.", comman)
             os._exit(1)         
     nbrCFSum = {}
-    for iteration in range(cf.nbrIterations):
+    for iteration in range(item.nbrIterations):
         # EXECUTE
         nCFsPerHost = []
         if host_mode:
-            hostsInView = subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select distinct HOST from SYS."+cf.view+"\"", shell=True).strip(' ').split('\n')
+            hostsInView = subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select distinct HOST from SYS."+item.view+"\"", shell=True).strip(' ').split('\n')
             hostsInView = [h for h in hostsInView if h != ''] 
             for host in hostsInView:
-                nCFsPerHost.append([int(subprocess.check_output(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select count(*) from SYS.'+cf.view+' where '+cf.whereClause+' and HOST = \''+host+'\'"', shell=True).split('|')[5].replace(" ", "")), host])
+                nCFsPerHost.append([int(subprocess.check_output(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select count(*) from SYS.'+item.view+' where '+item.whereClause+' and HOST = \''+host+'\'"', shell=True).split('|')[5].replace(" ", "")), host])
         else:                
-            nCFsPerHost.append([int(subprocess.check_output(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select count(*) from SYS.'+cf.view+' where '+cf.whereClause+'"', shell=True).split('|')[5].replace(" ", "")), ''])
+            nCFsPerHost.append([int(subprocess.check_output(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select count(*) from SYS.'+item.view+' where '+item.whereClause+'"', shell=True).split('|')[5].replace(" ", "")), ''])
         # COLLECT INFO
         if comman.log_features:  #already prevented that log features (-lf) and host mode (-hm) is not used together
-            critical_feature_info[0] = subprocess.check_output(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select * from SYS.'+cf.view+' where '+cf.whereClause+'"', shell=True)
+            critical_feature_info[0] = subprocess.check_output(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select * from SYS.'+item.view+' where '+item.whereClause+'"', shell=True)
         for cfHost in nCFsPerHost:
             if cfHost[1] in nbrCFSum:
                 nbrCFSum[cfHost[1]] += cfHost[0]
             else:
                 nbrCFSum[cfHost[1]] = cfHost[0]
         # CRITICAL FEATURE CHECK INTERVALL
-        time.sleep(float(cf.interval))       
+        time.sleep(float(item.interval))       
     # GET AVERAGE
     for h, nCF in nbrCFSum.items():
-        nbrCFSum[h] = int ( float(nCF) / float(cf.nbrIterations) )
+        nbrCFSum[h] = int ( float(nCF) / float(item.nbrIterations) )
     nbrCFsPerHost[0] = nbrCFSum  #output 
 
  
@@ -913,11 +919,69 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                             hdbcons.hostsForRecording = hostsWithWrongNbrCFs
                         recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
         if not recorded:
-            time.sleep(check_interval)
+	    recorded = True
+            #time.sleep(check_interval)
             if minRetainedLogDays >= 0:   # automatic house keeping of hanasitter logs
                 nCleaned = clean_logs(minRetainedLogDays, comman)
                 log(str(nCleaned)+" hanasitter daily log files were removed", comman)
     return [recorded, offline]
+            
+def alert(ping_timeout, check_interval, alert_features, feature_check_timeout, minRetainedLogDays, host_mode, comman, hdbcons):   
+    recorded = False
+    offline = False
+    while not recorded:
+        # PING CHECK - to find either hanging or offline situations
+        start_time = datetime.now()
+        [hanging, offline] = hana_ping(ping_timeout, comman)
+        stop_time = datetime.now()
+        if offline:            
+            comment = "DB is offline, will exit the tracker without recording (if DB is online, check that the key can be used with hdbsql)"
+        elif hanging:
+            comment = "No response from DB within "+str(ping_timeout)+" seconds"
+        else:
+            comment = "DB responded faster than "+str(ping_timeout)+" seconds"
+        log("Ping Check        , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          , "+str(not hanging and not offline)+"       , "+comment, comman, sendEmail = hanging or offline) 
+        if offline:
+            return [recorded, offline]    # exit the tracker if HANA turns offline during tracking
+        if not recorded:
+            # FEATURE CHECK - only done if recording has not already been done from either the CPU check or from the Ping check
+            chid = 0
+
+	    #@TODO: ADAPTAR PARA ALERTS
+            for af in alert_features:
+                if not recorded:    #No hang situation or critical feature situation happened yet, so check for a critical feature
+                    nbrAFsPerHost = [-1]
+                    alert_feature_info = [""]
+                    hostsWithWrongNbrAFs = []
+                    chid += 1
+                    start_time = datetime.now()
+                    t = Timer(0.1,feature_check,[af, nbrAFsPerHost, alert_feature_info, host_mode, comman])
+                    t.start()
+                    t.join((feature_check_timeout + af.interval)*af.nbrIterations)
+                    stop_time = datetime.now()
+                    hanging = t.is_alive()
+                    if hanging:
+                        info_message = "Hang situation during alert-check detected"
+                        printout = "Alert Check "+str(chid)+"     , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not hanging)+"       , " + af.name + " => " + info_message
+                        log(printout, comman, sendEmail = hanging)
+                    else: 
+                        for host, nAFs  in nbrAFsPerHost[0].items():
+                            wrong_number_alert_features = (af.limitIsMinimumNumberAFAllowed and nAFs < af.limit) or (not af.limitIsMinimumNumberAFAllowed and nAFs > af.limit)    
+                            info_message = "# AFs = "+str(nAFs)+" for "+host+", "+af.afInfo
+                            printout = "Alert Check "+str(chid)+"     , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not wrong_number_alert_features)+"       , "+ af.name + "\n=> " +info_message
+                            log(printout, comman, sendEmail = wrong_number_alert_features)
+                            if wrong_number_alert_features:
+                                hostsWithWrongNbrAFs.append(host)
+                    if comman.log_features:
+                        log(alert_feature_info[0], CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features), "alertFeatures")
+	recorded = True
+        #if not recorded:
+        #    time.sleep(check_interval)
+        #    if minRetainedLogDays >= 0:   # automatic house keeping of hanasitter logs
+        #        nCleaned = clean_logs(minRetainedLogDays, comman)
+        #        log(str(nCleaned)+" hanasitter daily log files were removed", comman)
+    return [recorded, offline]
+
             
 def cdalias(alias, local_dbinstance):   # alias e.g. cdtrace, cdhdb, ...
     command_run = subprocess.check_output(['/bin/bash', '-i', '-c', "alias "+alias]).split("alias")[1]
@@ -1600,7 +1664,7 @@ def main():
         os._exit(1)
     minRetainedLogDays = int(minRetainedLogDays)
     ### alert_features, -af
-    if len(alert_features)%5: # this also allow empty list in case just only ping check without feature check; -cf ""
+    if len(alert_features)%5: # this also allow empty list in case just only ping check without feature check; -af ""
         log("INPUT ERROR: -af must be a list with the length of multiple of 5. Please see --help for more information.", comman)
         os._exit(1)
     alert_features = [alert_features[i*5:i*5+5] for i in range(len(alert_features)/5)]
@@ -1724,7 +1788,7 @@ def main():
     for af in alert_features:
         chid += 1
         printout = "Alert Check "+str(chid)  + " - " + str(af.name) + " =>" 
-        if af.limitIsMinimumNumberCFAllowed:
+        if af.limitIsMinimumNumberAFAllowed:
             printout += " requires at least '"+str(af.limit)+"' times that '"+str(af.whereClauseDescription).strip()+"'"
         else:
             printout += " allows only '"+str(af.limit)+"' times that '"+str(af.whereClauseDescription).strip()+"'"
@@ -1768,23 +1832,50 @@ def main():
     try:
         if num_kprofs: #only if we write kernel profiler dumps will we need temporary output folders
             hdbcons.create_temp_output_directories() #create temporary output folders
-        while True: 
-            if is_online(local_dbinstance, comman) and not is_secondary(comman):
+	resume_tracking_on = datetime.now();
+	resume_alert_on = datetime.now();
+	alerts_triggered = []
+        while True: 	
+	    if ( (len(critical_features) > 0 and datetime.now() >= resume_tracking_on) or ( len(alert_features) > 0 and datetime.now() >= resume_alert_on )):
+               if is_online(local_dbinstance, comman) and not is_secondary(comman):
+		   log("Lenght Alert Features => " + str(len(alert_features)) + ", Lenght Critical Features => " + str(len(critical_features)) + ", Resume Alert on: " + resume_alert_on.strftime("%Y-%m-%d %H:%M:%S") + ", Resume Tracking on: " + resume_tracking_on.strftime("%Y-%m-%d %H:%M:%S"), comman)
+	           
+                   ############################################################################
+                   ## START LOGIC FOR ALERT HERE
+                   ############################################################################
+                   
+		   if (datetime.now() >= resume_alert_on and len(alert_features) > 0 ):
+		      #pass
+		      [alert_recorded, offline] = alert(ping_timeout, check_interval, alert_features, feature_check_timeout, minRetainedLogDays, host_mode, comman, hdbcons)
+		      resume_alert_on = datetime.now() + timedelta(seconds=float(check_interval))  
+                    
+                   ############################################################################
+                   ## END LOGIC FOR ALERT HERE
+                   ############################################################################
+                   
+		    
+	           if (datetime.now() >= resume_tracking_on and len(critical_features) > 0):
+                      [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, host_mode, comman, hdbcons)
+                      
+		      resume_tracking_on = datetime.now() + timedelta(seconds=float(check_interval))
 
-                ############################################################################
-                ## INSERT LOGIC FOR ALERT HERE
-                ############################################################################
-                #SSSSSSSSSS @TODO
+	              #@TODO: REIMPLEMENTAR A LOGICA QUANDO HÁ UM CRITICAL ALERT QUE É EXECUTADO. 
+		      #O CENARIO RECORDED DEIXA DE SER VALIDO QUANDO TEMOS MAIS QUE UMA FUNCAO A SER VALIDADA (ALERT CHECK)
+		      #ANTERIORMENTE O TEMPO DE ESPERA E AFINS FICAVA DENTRO DA FUNCAO TRACKER E SÓ VINHA PARA FORA QUANDO HAVIA 1 MATCH.
+		      #ESTA LOGICA TEM DE SER ALTERADA SENAO OS ALERTAS NAO ERAM VERIFICADOS. PENSAR EM NOVA LOGICA PARA ESTE MODELO.
 
-                [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, host_mode, comman, hdbcons)
-                if recorded:
-                    if after_recorded < 0: #if after_recorded is negative we want to exit after a recording
-                        hdbcons.clear()    #remove temporary output folders before exit
-                        sys.exit()
-                    time.sleep(float(after_recorded))  # after recorded call stacks and/or rte dumps it sleeps a bit and then continues tracking if HANA is online
-            else:
-                log("\nOne of the online checks found out that this HANA instance is not online. HANASitter will now have a "+str(online_test_interval)+" seconds break.\n", comman)
-                time.sleep(float(online_test_interval))  # wait online_test_interval seconds before again checking if HANA is running
+		      #if recorded:
+                      #   if after_recorded < 0: #if after_recorded is negative we want to exit after a recording
+                      #      hdbcons.clear()    #remove temporary output folders before exit
+                      # 	    sys.exit()
+		      #   resume_tracking_on = datetime.now() + timedelta(seconds=float(after_recorded))
+		   	 #log("Current Time: " + datetime.now().strftime("%m/%d/%Y, %H:%M:%S") + " => Resume at: " + resume_tracking_on.strftime("%m/%d/%Y, %H:%M:%S"), comman)
+                    	 #time.sleep(float(after_recorded))  # after recorded call stacks and/or rte dumps it sleeps a bit and then continues tracking if HANA is online
+		      #else:
+		      #   resume_tracking_on = datetime.now() + timedelta(seconds=float(check_interval))
+               else:
+                  log("\nOne of the online checks found out that this HANA instance is not online. HANASitter will now have a "+str(online_test_interval)+" seconds break.\n", comman)
+                  time.sleep(float(online_test_interval))  # wait online_test_interval seconds before again checking if HANA is running
     #except:           
     except Exception as e:
         print "HANASitter stopped with the exception: ", e
