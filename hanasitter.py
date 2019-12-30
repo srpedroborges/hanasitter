@@ -628,7 +628,7 @@ def cpu_too_high(cpu_check_params, comman):
     too_high_cpu = float(current_cpu) > int(cpu_check_params[3])
     stop_time = datetime.now()
     cpu_string = "User CPU Check  " if int(cpu_check_params[0]) == 1 else "System CPU Check"
-    printout = cpu_string+"  , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , True         , "+str(not too_high_cpu)+"       , Av. CPU = "+current_cpu+" % (Allowed = "+cpu_check_params[3]+" %) "
+    printout = cpu_string+"  , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , True         , "+ str(not too_high_cpu)+ ("" if too_high_cpu else " ") +  "      , Av. CPU = "+current_cpu+" % (Allowed = "+cpu_check_params[3]+" %) "
     log(printout, comman, sendEmail = too_high_cpu)
     return too_high_cpu
 
@@ -863,67 +863,64 @@ def parallel_recording(record_type, recorder, hdbcons, comman):
 def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, host_mode, comman, hdbcons):   
     recorded = False
     offline = False
-    while not recorded:
-        # CPU CHECK
-        if cpu_too_high(cpu_check_params, comman): #first check CPU with 'sar' (i.e. without contacting HANA) if it is too high, record without pinging or feature checking
-            recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
-        if not recorded:
-            # PING CHECK - to find either hanging or offline situations
-            start_time = datetime.now()
-            [hanging, offline] = hana_ping(ping_timeout, comman)
-            stop_time = datetime.now()
-            if offline:            
-                comment = "DB is offline, will exit the tracker without recording (if DB is online, check that the key can be used with hdbsql)"
-            elif hanging:
-                comment = "No response from DB within "+str(ping_timeout)+" seconds"
-            else:
-                comment = "DB responded faster than "+str(ping_timeout)+" seconds"
-            log("Ping Check        , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          , "+str(not hanging and not offline)+"       , "+comment, comman, sendEmail = hanging or offline) 
-            if hanging:
+    # CPU CHECK
+    if cpu_too_high(cpu_check_params, comman): #first check CPU with 'sar' (i.e. without contacting HANA) if it is too high, record without pinging or feature checking
+       recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
+       return [recorded, offline]
+    # PING CHECK - to find either hanging or offline situations
+    start_time = datetime.now()
+    [hanging, offline] = hana_ping(ping_timeout, comman)
+    stop_time = datetime.now()
+    if offline:            
+	comment = "DB is offline, will exit the tracker without recording (if DB is online, check that the key can be used with hdbsql)"
+    elif hanging:
+	comment = "No response from DB within "+str(ping_timeout)+" seconds"
+    else:
+	comment = "DB responded faster than "+str(ping_timeout)+" seconds"
+    log("Ping Check        , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          , "+str(not hanging and not offline)+"       , "+comment, comman, sendEmail = hanging or offline) 
+    if hanging:
+	recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
+    if offline:
+	return [recorded, offline]    # exit the tracker if HANA turns offline during tracking
+    # FEATURE CHECK - only done if recording has not already been done from either the CPU check or from the Ping check
+    chid = 0
+    for cf in critical_features:
+	if not recorded:    #No hang situation or critical feature situation happened yet, so check for a critical feature
+	    nbrCFsPerHost = [-1]
+	    critical_feature_info = [""]
+	    hostsWithWrongNbrCFs = []
+	    chid += 1
+	    start_time = datetime.now()
+	    t = Timer(0.1,feature_check,[cf, nbrCFsPerHost, critical_feature_info, host_mode, comman])
+	    t.start()
+	    t.join((feature_check_timeout + cf.interval)*cf.nbrIterations)
+	    stop_time = datetime.now()
+	    hanging = t.is_alive()
+	    if hanging:
+		info_message = "Hang situation during feature-check detected"
+		printout = "Feature Check "+str(chid)+"   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not hanging)+"       , "+info_message
+		log(printout, comman, sendEmail = hanging)
+	    else: 
+		for host, nCFs  in nbrCFsPerHost[0].items():
+		    if (len(host) < 1):
+			host = hdbcons.local_host
+		    wrong_number_critical_features = (cf.limitIsMinimumNumberCFAllowed and nCFs < cf.limit) or (not cf.limitIsMinimumNumberCFAllowed and nCFs > cf.limit)    
+		    info_message = "# CFs = "+str(nCFs)+" for "+hdbcons.SID+"@"+host+", "+cf.cfInfo
+		    printout = "Feature Check "+str(chid)+"   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not wrong_number_critical_features)+ ("" if wrong_number_critical_features else " ") +  "      , "+info_message
+		    log(printout, comman, sendEmail = wrong_number_critical_features)
+		    if wrong_number_critical_features:
+			hostsWithWrongNbrCFs.append(host)
+	    if comman.log_features:
+		log(critical_feature_info[0], CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features), "criticalFeatures")
+	    if hanging or len(hostsWithWrongNbrCFs):
+		if cf.killSession:
+		    stop_session(cf, comman)
+		if host_mode:
+		    hdbcons.hostsForRecording = hostsWithWrongNbrCFs
                 recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
-            if offline:
-                return [recorded, offline]    # exit the tracker if HANA turns offline during tracking
-        if not recorded:
-            # FEATURE CHECK - only done if recording has not already been done from either the CPU check or from the Ping check
-            chid = 0
-            for cf in critical_features:
-                if not recorded:    #No hang situation or critical feature situation happened yet, so check for a critical feature
-                    nbrCFsPerHost = [-1]
-                    critical_feature_info = [""]
-                    hostsWithWrongNbrCFs = []
-                    chid += 1
-                    start_time = datetime.now()
-                    t = Timer(0.1,feature_check,[cf, nbrCFsPerHost, critical_feature_info, host_mode, comman])
-                    t.start()
-                    t.join((feature_check_timeout + cf.interval)*cf.nbrIterations)
-                    stop_time = datetime.now()
-                    hanging = t.is_alive()
-                    if hanging:
-                        info_message = "Hang situation during feature-check detected"
-                        printout = "Feature Check "+str(chid)+"   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not hanging)+"       , "+info_message
-                        log(printout, comman, sendEmail = hanging)
-                    else: 
-                        for host, nCFs  in nbrCFsPerHost[0].items():
-                            wrong_number_critical_features = (cf.limitIsMinimumNumberCFAllowed and nCFs < cf.limit) or (not cf.limitIsMinimumNumberCFAllowed and nCFs > cf.limit)    
-                            info_message = "# CFs = "+str(nCFs)+" for "+host+", "+cf.cfInfo
-                            printout = "Feature Check "+str(chid)+"   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not wrong_number_critical_features)+"       , "+info_message
-                            log(printout, comman, sendEmail = wrong_number_critical_features)
-                            if wrong_number_critical_features:
-                                hostsWithWrongNbrCFs.append(host)
-                    if comman.log_features:
-                        log(critical_feature_info[0], CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features), "criticalFeatures")
-                    if hanging or len(hostsWithWrongNbrCFs):
-                        if cf.killSession:
-                            stop_session(cf, comman)
-                        if host_mode:
-                            hdbcons.hostsForRecording = hostsWithWrongNbrCFs
-                        recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
-        if not recorded:
-	    recorded = True
-            #time.sleep(check_interval)
-            if minRetainedLogDays >= 0:   # automatic house keeping of hanasitter logs
-                nCleaned = clean_logs(minRetainedLogDays, comman)
-                log(str(nCleaned)+" hanasitter daily log files were removed", comman)
+    if minRetainedLogDays >= 0:   # automatic house keeping of hanasitter logs
+	nCleaned = clean_logs(minRetainedLogDays, comman)
+	log(str(nCleaned)+" hanasitter daily log files were removed", comman)
     return [recorded, offline]
             
 def alert(ping_timeout, check_interval, alert_features, feature_check_timeout, minRetainedLogDays, host_mode, comman, hdbcons):   
@@ -947,7 +944,6 @@ def alert(ping_timeout, check_interval, alert_features, feature_check_timeout, m
             # FEATURE CHECK - only done if recording has not already been done from either the CPU check or from the Ping check
             chid = 0
 
-	    #@TODO: ADAPTAR PARA ALERTS
             for af in alert_features:
                 if not recorded:    #No hang situation or critical feature situation happened yet, so check for a critical feature
                     nbrAFsPerHost = [-1]
@@ -966,8 +962,10 @@ def alert(ping_timeout, check_interval, alert_features, feature_check_timeout, m
                         log(printout, comman, sendEmail = hanging)
                     else: 
                         for host, nAFs  in nbrAFsPerHost[0].items():
+			    if(len(host) < 1):
+				host = hdbcons.local_host
                             wrong_number_alert_features = (af.limitIsMinimumNumberAFAllowed and nAFs < af.limit) or (not af.limitIsMinimumNumberAFAllowed and nAFs > af.limit)    
-                            info_message = "# AFs = "+str(nAFs)+" for "+host+", "+af.afInfo
+                            info_message = "# AFs = "+str(nAFs)+" for "+ hdbcons.SID+"@"+host+", "+af.afInfo
                             printout = "Alert Check "+str(chid)+"     , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not wrong_number_alert_features)+"       , "+ af.name + "\n=> " +info_message
                             log(printout, comman, sendEmail = wrong_number_alert_features)
                             if wrong_number_alert_features:
@@ -1820,9 +1818,9 @@ def main():
         cpu_string = "User CPU Check:     " if int(cpu_check_params[0]) == 1 else "System CPU Check: "
         log(cpu_string+", Every "+cpu_check_params[2]+" seconds, Number CPU Checks = "+cpu_check_params[1]+", Max allowed av. CPU = "+cpu_check_params[3]+" %", comman)
     if after_recorded < 0:
-        log("After Recording: Exit", comman)
+        log("After Recording CF or CPU: Exit", comman)
     else:
-        log("After Recording: Sleep "+str(after_recorded)+" seconds", comman)
+        log("After Recording CF or CPU: Wait "+str(after_recorded)+" seconds before resuming these checks", comman)
     log(" - - - - - Start HANASitter - - - - - - ", comman)
     log("Action            , Timestamp              , Duration         , Successful   , Result     , Comment ", comman)
     rte = RTESetting(num_rtedumps, rtedumps_interval, zip_mode, hda_enable, hda_jpath, hda_path)
@@ -1836,7 +1834,7 @@ def main():
 	resume_alert_on = datetime.now();
 	alerts_triggered = []
         while True: 	
-	    if ( (len(critical_features) > 0 and datetime.now() >= resume_tracking_on) or ( len(alert_features) > 0 and datetime.now() >= resume_alert_on )):
+	    if ( ((len(critical_features) > 0 or (len(cpu_check_params) > 0)) and datetime.now() >= resume_tracking_on) or ( len(alert_features) > 0 and datetime.now() >= resume_alert_on )):
                if is_online(local_dbinstance, comman) and not is_secondary(comman):
 		   log("Lenght Alert Features => " + str(len(alert_features)) + ", Lenght Critical Features => " + str(len(critical_features)) + ", Resume Alert on: " + resume_alert_on.strftime("%Y-%m-%d %H:%M:%S") + ", Resume Tracking on: " + resume_tracking_on.strftime("%Y-%m-%d %H:%M:%S"), comman)
 	           
@@ -1845,7 +1843,6 @@ def main():
                    ############################################################################
                    
 		   if (datetime.now() >= resume_alert_on and len(alert_features) > 0 ):
-		      #pass
 		      [alert_recorded, offline] = alert(ping_timeout, check_interval, alert_features, feature_check_timeout, minRetainedLogDays, host_mode, comman, hdbcons)
 		      resume_alert_on = datetime.now() + timedelta(seconds=float(check_interval))  
                     
@@ -1854,25 +1851,19 @@ def main():
                    ############################################################################
                    
 		    
-	           if (datetime.now() >= resume_tracking_on and len(critical_features) > 0):
+	           if (datetime.now() >= resume_tracking_on and (len(critical_features) > 0 or len(cpu_check_params) > 0)):
                       [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, host_mode, comman, hdbcons)
-                      
-		      resume_tracking_on = datetime.now() + timedelta(seconds=float(check_interval))
+		      
+		      if not recorded: 
+		      	resume_tracking_on = datetime.now() + timedelta(seconds=float(check_interval))
+		      else:
+                      	if after_recorded < 0: #if after_recorded is negative we want to exit after a recording
+                           hdbcons.clear()    #remove temporary output folders before exit
+                      	   sys.exit()
+	 
+		      	resume_tracking_on = datetime.now() + timedelta(seconds=float(after_recorded))
+			log("=> Current Time: " + datetime.now().strftime("%m/%d/%Y, %H:%M:%S") + " => Resume at: " + resume_tracking_on.strftime("%m/%d/%Y, %H:%M:%S"), comman)
 
-	              #@TODO: REIMPLEMENTAR A LOGICA QUANDO HÁ UM CRITICAL ALERT QUE É EXECUTADO. 
-		      #O CENARIO RECORDED DEIXA DE SER VALIDO QUANDO TEMOS MAIS QUE UMA FUNCAO A SER VALIDADA (ALERT CHECK)
-		      #ANTERIORMENTE O TEMPO DE ESPERA E AFINS FICAVA DENTRO DA FUNCAO TRACKER E SÓ VINHA PARA FORA QUANDO HAVIA 1 MATCH.
-		      #ESTA LOGICA TEM DE SER ALTERADA SENAO OS ALERTAS NAO ERAM VERIFICADOS. PENSAR EM NOVA LOGICA PARA ESTE MODELO.
-
-		      #if recorded:
-                      #   if after_recorded < 0: #if after_recorded is negative we want to exit after a recording
-                      #      hdbcons.clear()    #remove temporary output folders before exit
-                      # 	    sys.exit()
-		      #   resume_tracking_on = datetime.now() + timedelta(seconds=float(after_recorded))
-		   	 #log("Current Time: " + datetime.now().strftime("%m/%d/%Y, %H:%M:%S") + " => Resume at: " + resume_tracking_on.strftime("%m/%d/%Y, %H:%M:%S"), comman)
-                    	 #time.sleep(float(after_recorded))  # after recorded call stacks and/or rte dumps it sleeps a bit and then continues tracking if HANA is online
-		      #else:
-		      #   resume_tracking_on = datetime.now() + timedelta(seconds=float(check_interval))
                else:
                   log("\nOne of the online checks found out that this HANA instance is not online. HANASitter will now have a "+str(online_test_interval)+" seconds break.\n", comman)
                   time.sleep(float(online_test_interval))  # wait online_test_interval seconds before again checking if HANA is running
