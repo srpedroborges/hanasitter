@@ -414,6 +414,19 @@ class CriticalFeature:
         
 #- Slack alerting integration - 
 
+class AlertTriggered:
+    def __init__(self, index, name, recheck_on):
+        self.index = index
+	self.name = name
+	self.recheck_on = recheck_on
+    def NextRecheck(self):
+	return self.recheck_on
+    def NextRecheckToString(self):
+	return self.recheck_on.strftime("%Y-%m-%d %H:%M:%S")
+    def QuickCheck(self):
+	return [ self.index , self.name ]
+
+
 class AlertFeature:
     def __init__(self, view, feature, value, limit, name, triggered):
         self.name = name
@@ -860,7 +873,7 @@ def parallel_recording(record_type, recorder, hdbcons, comman):
     else:
         return record_kprof(recorder, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features))
 
-def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, host_mode, comman, hdbcons):   
+def tracker(ping_timeout, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, host_mode, comman, hdbcons):   
     recorded = False
     offline = False
     # CPU CHECK
@@ -918,66 +931,92 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
 		if host_mode:
 		    hdbcons.hostsForRecording = hostsWithWrongNbrCFs
                 recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
-    if minRetainedLogDays >= 0:   # automatic house keeping of hanasitter logs
-	nCleaned = clean_logs(minRetainedLogDays, comman)
-	log(str(nCleaned)+" hanasitter daily log files were removed", comman)
     return [recorded, offline]
             
-def alert(ping_timeout, check_interval, alert_features, feature_check_timeout, minRetainedLogDays, host_mode, comman, hdbcons):   
+def alert(ping_timeout, alert_features, feature_check_timeout, host_mode, comman, hdbcons, alert_triggered_interval, alerts_triggered):   
     recorded = False
-    offline = False
-    while not recorded:
-        # PING CHECK - to find either hanging or offline situations
-        start_time = datetime.now()
-        [hanging, offline] = hana_ping(ping_timeout, comman)
-        stop_time = datetime.now()
-        if offline:            
-            comment = "DB is offline, will exit the tracker without recording (if DB is online, check that the key can be used with hdbsql)"
-        elif hanging:
-            comment = "No response from DB within "+str(ping_timeout)+" seconds"
-        else:
-            comment = "DB responded faster than "+str(ping_timeout)+" seconds"
-        log("Ping Check        , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          , "+str(not hanging and not offline)+"       , "+comment, comman, sendEmail = hanging or offline) 
-        if offline:
-            return [recorded, offline]    # exit the tracker if HANA turns offline during tracking
-        if not recorded:
-            # FEATURE CHECK - only done if recording has not already been done from either the CPU check or from the Ping check
-            chid = 0
-
-            for af in alert_features:
-                if not recorded:    #No hang situation or critical feature situation happened yet, so check for a critical feature
-                    nbrAFsPerHost = [-1]
-                    alert_feature_info = [""]
-                    hostsWithWrongNbrAFs = []
-                    chid += 1
-                    start_time = datetime.now()
-                    t = Timer(0.1,feature_check,[af, nbrAFsPerHost, alert_feature_info, host_mode, comman])
-                    t.start()
-                    t.join((feature_check_timeout + af.interval)*af.nbrIterations)
-                    stop_time = datetime.now()
-                    hanging = t.is_alive()
-                    if hanging:
-                        info_message = "Hang situation during alert-check detected"
-                        printout = "Alert Check "+str(chid)+"     , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not hanging)+"       , " + af.name + " => " + info_message
-                        log(printout, comman, sendEmail = hanging)
-                    else: 
-                        for host, nAFs  in nbrAFsPerHost[0].items():
-			    if(len(host) < 1):
-				host = hdbcons.local_host
-                            wrong_number_alert_features = (af.limitIsMinimumNumberAFAllowed and nAFs < af.limit) or (not af.limitIsMinimumNumberAFAllowed and nAFs > af.limit)    
-                            info_message = "# AFs = "+str(nAFs)+" for "+ hdbcons.SID+"@"+host+", "+af.afInfo
-                            printout = "Alert Check "+str(chid)+"     , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not wrong_number_alert_features)+"       , "+ af.name + "\n=> " +info_message
-                            log(printout, comman, sendEmail = wrong_number_alert_features)
-                            if wrong_number_alert_features:
-                                hostsWithWrongNbrAFs.append(host)
-                    if comman.log_features:
-                        log(alert_feature_info[0], CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features), "alertFeatures")
-	recorded = True
-        #if not recorded:
-        #    time.sleep(check_interval)
-        #    if minRetainedLogDays >= 0:   # automatic house keeping of hanasitter logs
-        #        nCleaned = clean_logs(minRetainedLogDays, comman)
-        #        log(str(nCleaned)+" hanasitter daily log files were removed", comman)
+    offline = False 
+    # PING CHECK - to find either hanging or offline situations
+    start_time = datetime.now()
+    [hanging, offline] = hana_ping(ping_timeout, comman)
+    stop_time = datetime.now()
+    if offline:            
+       comment = "DB is offline, will exit the tracker without recording (if DB is online, check that the key can be used with hdbsql)"
+    elif hanging:
+       comment = "No response from DB within "+str(ping_timeout)+" seconds"
+    else:
+       comment = "DB responded faster than "+str(ping_timeout)+" seconds"
+    log("Ping Check        , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          , "+str(not hanging and not offline)+"       , "+comment, comman, sendEmail = hanging or offline) 
+    if offline:
+       return [recorded, offline]    # exit the tracker if HANA turns offline during tracking
+    # FEATURE CHECK - only done if recording has not already been done from either the CPU check or from the Ping check
+    chid = 0
+    for af in alert_features:
+	if not recorded:    #No hang situation or critical feature situation happened yet, so check for a critical feature
+	    check_alert = True
+	    notify_if_alert_is_cleared = False
+	    nbrAFsPerHost = [-1]
+	    alert_feature_info = [""]
+	    hostsWithWrongNbrAFs = []
+	    chid += 1
+	    #check if this alert has been triggered before
+	    for alert in alerts_triggered:
+		#this alert has already triggered
+		if (alert.index == chid):
+		   #print("alert.index == chid")
+		   #is it time to recheck?
+	       	   if (alert.NextRecheck() > datetime.now()):
+		       #print("alert.NextRecheck() < datetime.now()")
+		       #if not, don't check
+		       check_alert = False
+	               #print("Alert '{0}' - {1} is not ready to be executed yet. Next Run @ {2}".format(str(chid), af.name, alert.NextRecheckToString()))
+		   #We found the alert, no need to check anything else
+		   else:
+			#the alert is ready to be rechecked
+			alerts_triggered.remove(alert)
+			#since this alert was triggered in a previous iteration we want to send an OK alert in case the alert is no longer an issue
+			notify_if_alert_is_cleared = True
+                   break
+	    if not check_alert:
+		continue
+	    start_time = datetime.now()
+	    t = Timer(0.1,feature_check,[af, nbrAFsPerHost, alert_feature_info, host_mode, comman])
+	    t.start()
+	    t.join((feature_check_timeout + af.interval)*af.nbrIterations)
+	    stop_time = datetime.now()
+	    hanging = t.is_alive()
+	    if hanging:
+		info_message = "Hang situation during alert-check detected"
+		printout = "Alert Check "+str(chid)+"     , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not hanging)+"       , " + af.name + " => " + info_message
+		log(printout, comman, sendEmail = hanging)
+	    else: 
+		for host, nAFs  in nbrAFsPerHost[0].items():
+		    if(len(host) < 1):
+		       host = hdbcons.local_host
+		    wrong_number_alert_features = (af.limitIsMinimumNumberAFAllowed and nAFs < af.limit) or (not af.limitIsMinimumNumberAFAllowed and nAFs > af.limit)    
+		    info_message = "# AFs = "+str(nAFs)+" for "+ hdbcons.SID+"@"+host+", "+af.afInfo
+		    printout = "Alert Check "+str(chid)+"     , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not wrong_number_alert_features)+ ("" if wrong_number_alert_features else " ") +  "      , "+ af.name + "\n=> " +info_message
+		    log(printout, comman, sendEmail = wrong_number_alert_features)
+		    if wrong_number_alert_features:
+			#check if the alert was already triggered
+			alert_found = False
+                        for alert in alerts_triggered:
+			   #print("QuickCheck: " + str(alert.QuickCheck()) + "\nCompared to: " + str([ chid , af.name ]) )
+			   if(alert.QuickCheck() == [ chid , af.name ]):
+				alert_found = True
+				break
+			#if this alert hasn't been triggered yet, add it to the list
+			if not (alert_found):
+			   #print("af.name: " + af.name)
+			   alert = AlertTriggered(chid, af.name, datetime.now() + timedelta(seconds=float(alert_triggered_interval))) 
+			   #print("AlertTriggered => chid: '{0}' :: name: '{1}' :: NextCheck: '{2}'".format(alert.index, alert.name, alert.NextRecheckToString()))
+			   alerts_triggered.append(alert)
+			hostsWithWrongNbrAFs.append(host)
+		    elif notify_if_alert_is_cleared:
+			print("==> SEND ALERT SAYING EVERYTHING IS OK")
+ 
+	    if comman.log_features:
+		log(alert_feature_info[0], CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features), "alertFeatures")
     return [recorded, offline]
 
             
@@ -1188,6 +1227,8 @@ def main():
     online_test_interval = 3600 #seconds
     ping_timeout = 60 #seconds
     check_interval = 60 #seconds
+    alert_check_interval = 60 #seconds
+    alert_triggered_interval = 300 #seconds
     recording_mode = 1 # either 1, 2 or 3
     recording_prio = ['1', '2', '3', '4']   # 1=RTE, 2=CallStacks, 3=GStacks, 4=Kernel Profiler
     host_mode = "false"
@@ -1223,7 +1264,9 @@ def main():
                             # KEY SYSTEMKEY
                             #     ENV : mo-fc8d991e0:30015
                             #     USER: SYSTEM
-    cpu_check_params = ['0', '0','0','100'] # by default no cpu check
+    NO_CPU_CHECK_VALUES = ['0', '0','0','100'] 
+    #cpu_check_params = ['0', '0','0','100'] # by default no cpu check
+    cpu_check_params = NO_CPU_CHECK_VALUES # by default no cpu check
     #ADDED#######################################################################################################################################################
     zip_mode = "no"
     hda_enable = "no"
@@ -1269,6 +1312,10 @@ def main():
                         ping_timeout = flagValue
                     if firstWord == '-ci': 
                         check_interval = flagValue
+                    if firstWord == '-ai': 
+                        alert_check_interval = flagValue
+		    if firstWord == '-ati':
+			alert_triggered_interval = flagValue 
                     if firstWord == '-rm': 
                         recording_mode = flagValue
                     if firstWord == '-rp': 
@@ -1353,6 +1400,10 @@ def main():
         ping_timeout = sys.argv[sys.argv.index('-pt') + 1]
     if '-ci' in sys.argv:
         check_interval = sys.argv[sys.argv.index('-ci') + 1]
+    if '-ai' in sys.argv:
+        alert_check_interval = sys.argv[sys.argv.index('-ai') + 1]
+    if '-ati' in sys.argv:
+	alert_triggered_interval = sys.argv[sys.argv.index('-ati') + 1]
     if '-rm' in sys.argv:
         recording_mode = sys.argv[sys.argv.index('-rm') + 1]
     if '-rp' in sys.argv:
@@ -1554,6 +1605,16 @@ def main():
         log("INPUT ERROR: -ci must be an integer. Please see --help for more information.", comman)
         os._exit(1)
     check_interval = int(check_interval)
+    ### alert_check_interval, -ai
+    if not is_integer(alert_check_interval):
+        log("INPUT ERROR: -ai must be an integer. Please see --help for more information.", comman)
+        os._exit(1)
+    alert_check_interval = int(alert_check_interval)
+    ### alert_triggered_interval, -ati
+    if not is_integer(alert_triggered_interval):
+        log("INPUT ERROR: -ati must be an integer. Please see --help for more information.", comman)
+        os._exit(1)
+    alert_triggered_interval  = int(alert_triggered_interval)
     ### recording_mode, -rm
     if not is_integer(recording_mode):
         log("INPUT ERROR: -rm must be an integer. Please see --help for more information.", comman)
@@ -1776,7 +1837,7 @@ def main():
     log(printout, comman)       
     log("Online, Primary and Not-Secondary Check: Interval = "+str(online_test_interval)+" seconds", comman)
     log("Ping Check: Interval = "+str(check_interval)+" seconds, Timeout = "+str(ping_timeout)+" seconds", comman)
-    log("Alert Checks: Interval "+str(check_interval)+" seconds, Timeout = "+str(feature_check_timeout)+" seconds", comman)
+    log("Alert Checks: Interval "+str(alert_check_interval)+" seconds, Timeout = "+str(feature_check_timeout)+" seconds, Triggered Recheck = " + str(alert_triggered_interval) +" seconds" , comman) 
     log("Feature Checks: Interval "+str(check_interval)+" seconds, Timeout = "+str(feature_check_timeout)+" seconds", comman)
     if(slackNotification):
       log("Slack Notification: Enabled", comman)
@@ -1834,35 +1895,39 @@ def main():
 	resume_alert_on = datetime.now();
 	alerts_triggered = []
         while True: 	
-	    if ( ((len(critical_features) > 0 or (len(cpu_check_params) > 0)) and datetime.now() >= resume_tracking_on) or ( len(alert_features) > 0 and datetime.now() >= resume_alert_on )):
+	    if ( ((len(critical_features) > 0 or  cpu_check_params != NO_CPU_CHECK_VALUES) and datetime.now() >= resume_tracking_on) or ( len(alert_features) > 0 and datetime.now() >= resume_alert_on )):
                if is_online(local_dbinstance, comman) and not is_secondary(comman):
-		   log("Lenght Alert Features => " + str(len(alert_features)) + ", Lenght Critical Features => " + str(len(critical_features)) + ", Resume Alert on: " + resume_alert_on.strftime("%Y-%m-%d %H:%M:%S") + ", Resume Tracking on: " + resume_tracking_on.strftime("%Y-%m-%d %H:%M:%S"), comman)
+		   #log("Lenght Alert Features => " + str(len(alert_features)) + ", Lenght Critical Features => " + str(len(critical_features)) + ", Resume Alert on: " + resume_alert_on.strftime("%Y-%m-%d %H:%M:%S") + ", Resume Tracking on: " + resume_tracking_on.strftime("%Y-%m-%d %H:%M:%S"), comman)
 	           
                    ############################################################################
                    ## START LOGIC FOR ALERT HERE
                    ############################################################################
                    
 		   if (datetime.now() >= resume_alert_on and len(alert_features) > 0 ):
-		      [alert_recorded, offline] = alert(ping_timeout, check_interval, alert_features, feature_check_timeout, minRetainedLogDays, host_mode, comman, hdbcons)
-		      resume_alert_on = datetime.now() + timedelta(seconds=float(check_interval))  
+		      [alert_recorded, offline] = alert(ping_timeout, alert_features, feature_check_timeout, host_mode, comman, hdbcons, alert_triggered_interval, alerts_triggered)
+		      resume_alert_on = datetime.now() + timedelta(seconds=float(alert_check_interval))  
+		      #log("=> Current Time: " + datetime.now().strftime("%m/%d/%Y, %H:%M:%S") + " => Resume Alert at: " + resume_alert_on.strftime("%m/%d/%Y, %H:%M:%S"), comman)
+		      #print("Alerts_Triggered: " + str(len(alerts_triggered)))
                     
                    ############################################################################
                    ## END LOGIC FOR ALERT HERE
                    ############################################################################
                    
 		    
-	           if (datetime.now() >= resume_tracking_on and (len(critical_features) > 0 or len(cpu_check_params) > 0)):
-                      [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, host_mode, comman, hdbcons)
-		      
+	           if (datetime.now() >= resume_tracking_on and (len(critical_features) > 0 or cpu_check_params != NO_CPU_CHECK_VALUES)):
+                      [recorded, offline] = tracker(ping_timeout, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, host_mode, comman, hdbcons)
 		      if not recorded: 
 		      	resume_tracking_on = datetime.now() + timedelta(seconds=float(check_interval))
 		      else:
                       	if after_recorded < 0: #if after_recorded is negative we want to exit after a recording
                            hdbcons.clear()    #remove temporary output folders before exit
                       	   sys.exit()
-	 
 		      	resume_tracking_on = datetime.now() + timedelta(seconds=float(after_recorded))
-			log("=> Current Time: " + datetime.now().strftime("%m/%d/%Y, %H:%M:%S") + " => Resume at: " + resume_tracking_on.strftime("%m/%d/%Y, %H:%M:%S"), comman)
+		      #log("=> Current Time: " + datetime.now().strftime("%m/%d/%Y, %H:%M:%S") + " => Resume Tracking at: " + resume_tracking_on.strftime("%m/%d/%Y, %H:%M:%S"), comman)
+    		   
+		   if minRetainedLogDays >= 0:   # automatic house keeping of hanasitter logs
+		      nCleaned = clean_logs(minRetainedLogDays, comman)
+	              log(str(nCleaned)+" hanasitter daily log files were removed", comman)
 
                else:
                   log("\nOne of the online checks found out that this HANA instance is not online. HANASitter will now have a "+str(online_test_interval)+" seconds break.\n", comman)
