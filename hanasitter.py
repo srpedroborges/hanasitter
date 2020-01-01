@@ -206,16 +206,16 @@ slackNotification = None
 {
     "attachments": [
                 {
-                   "fallback": "[<date>] Alert triggered for HANA <sid> - <hostname> : <prettyDescription>",
-                       "pretext": "Alert triggered on <date>",
+                   "fallback": "[<date> <timezone>] Alert triggered for HANA <sid>@<hostname> [<status>] - <alert>",
+                   "pretext": "Alert triggered on <date> <timezone>",
                    "title": "HANA <sid> - <hostname>",
-                   "text": "Alert: <prettyDescription><details>",
+                   "text": "Status: <status>\\nAlert: <alert><next_check>",
                            "color": <color>
                 }
                     ]
 }
 '''
-slackMessageTemplate ='''{"attachments": [{"fallback": "[<date>] Alert triggered for HANA <sid> - <hostname> : <prettyDescription>","pretext": "Alert triggered on <date>","title": "HANA <sid> - <hostname>","text": "Alert: <prettyDescription><details>","color": "<color>"}]}'''
+slackMessageTemplate ='''{"attachments": [{"fallback": "[<date> <timezone>] Alert triggered for HANA <sid>@<hostname> [<status>] - <alert>","pretext": "Alert triggered on <date> <timezone>","title": "HANA <sid> - <hostname>","text": "Status: <status>\\nAlert: <alert><next_check>","color": "<color>"}]}'''
 #- End Slack alerting integration - 
 
 ######################## DEFINE CLASSES ##################################
@@ -259,16 +259,14 @@ class EmailNotification:
 
 #- Slack alerting integration - 
 class SlackNotification:
-    def __init__(self, webhook, sid, hostname):
+    def __init__(self, webhook):
         self.webhook = webhook
-        self.sid = sid
-        self.hostname = hostname
-    def alertColor(self):
-	return "FF0000"
-    def okColor(self):
-	return "00FF00"
-    def printSlackNotification(self):
-        print("Slack Webhook: ", self.webhook, " HANA SID: ", self.sid, " Hostname: ", self.hostname)
+    def getWebhook(self):
+	return self.webhook
+    def alertInfo(self):
+	return ["ISSUE","FF0000"]
+    def okInfo(self):
+	return ["OK","00FF00"]
 #- End Slack alerting integration -
 
 
@@ -933,7 +931,7 @@ def tracker(ping_timeout, recording_mode, rte, callstack, gstack, kprofiler, rec
                 recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
     return [recorded, offline]
             
-def alert(ping_timeout, alert_features, feature_check_timeout, host_mode, comman, hdbcons, alert_triggered_interval, alerts_triggered):   
+def alert(ping_timeout, alert_features, feature_check_timeout, host_mode, comman, hdbcons, alert_triggered_interval, alerts_triggered, slack_notification_timeout):   
     recorded = False
     offline = False 
     # PING CHECK - to find either hanging or offline situations
@@ -993,9 +991,10 @@ def alert(ping_timeout, alert_features, feature_check_timeout, host_mode, comman
 		for host, nAFs  in nbrAFsPerHost[0].items():
 		    if(len(host) < 1):
 		       host = hdbcons.local_host
+		    current_time_to_string = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 		    wrong_number_alert_features = (af.limitIsMinimumNumberAFAllowed and nAFs < af.limit) or (not af.limitIsMinimumNumberAFAllowed and nAFs > af.limit)    
 		    info_message = "# AFs = "+str(nAFs)+" for "+ hdbcons.SID+"@"+host+", "+af.afInfo
-		    printout = "Alert Check "+str(chid)+"     , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not wrong_number_alert_features)+ ("" if wrong_number_alert_features else " ") +  "      , "+ af.name + "\n=> " +info_message
+		    printout = "Alert Check "+str(chid)+"     , "+current_time_to_string+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not wrong_number_alert_features)+ ("" if wrong_number_alert_features else " ") +  "      , "+ af.name + "\n=> " +info_message
 		    log(printout, comman, sendEmail = wrong_number_alert_features)
 		    if wrong_number_alert_features:
 			#check if the alert was already triggered
@@ -1008,12 +1007,44 @@ def alert(ping_timeout, alert_features, feature_check_timeout, host_mode, comman
 			#if this alert hasn't been triggered yet, add it to the list
 			if not (alert_found):
 			   #print("af.name: " + af.name)
-			   alert = AlertTriggered(chid, af.name, datetime.now() + timedelta(seconds=float(alert_triggered_interval))) 
+			   next_check_date = datetime.now() + timedelta(seconds=float(alert_triggered_interval))
+		           next_check_date_to_string = next_check_date.strftime("%Y-%m-%d %H:%M:%S")
+			   alert = AlertTriggered(chid, af.name, next_check_date) 
 			   #print("AlertTriggered => chid: '{0}' :: name: '{1}' :: NextCheck: '{2}'".format(alert.index, alert.name, alert.NextRecheckToString()))
 			   alerts_triggered.append(alert)
+			   global slackNotification
+			   if (slackNotification):
+	    		      s = Timer(0.1,processSlackAlert,[af.name, hdbcons.SID, host, slackNotification.getWebhook(), current_time_to_string, slackNotification.alertInfo(), next_check_date_to_string ])
+	    		      notification_start_time = datetime.now()
+			      s.start()
+	                      s.join(slack_notification_timeout)
+			      notification_end_time = datetime.now()
+	                      slack_delivery_hanging = s.is_alive()
+			      printout = ""
+
+			      if (slack_delivery_hanging):
+				 printout = "=> Slack Delivery hanged - network issues?"
+			      else:
+				 notification_deltatime = notification_end_time - notification_start_time
+				 printout = "=> Slack notification delivered in {0}.{1}s".format(str(notification_deltatime.seconds), str(notification_deltatime.microseconds))
+			      #processSlackAlert(af.name, hdbcons.SID, host, slackNotification.getWebhook() , current_time_to_string, slackNotification.alertInfo(), next_check_date_to_string  )
+			      log(printout, comman, sendEmail = hanging)
 			hostsWithWrongNbrAFs.append(host)
 		    elif notify_if_alert_is_cleared:
-			print("==> SEND ALERT SAYING EVERYTHING IS OK")
+	    		s = Timer(0.1,processSlackAlert,[af.name, hdbcons.SID, host, slackNotification.getWebhook(), current_time_to_string, slackNotification.okInfo() ])
+	    		notification_start_time = datetime.now()
+			s.start()
+	                s.join(slack_notification_timeout)
+			notification_end_time = datetime.now()
+	                slack_delivery_hanging = s.is_alive()
+			printout = ""
+			if (slack_delivery_hanging):
+		           printout = "=> Slack Delivery hanged - network issues?"
+			else:
+		           notification_deltatime = notification_end_time - notification_start_time
+			   printout = "=> Slack notification delivered in {0}.{1}s".format(str(notification_deltatime.seconds), str(notification_deltatime.microseconds))
+			log(printout, comman, sendEmail = hanging)
+		        #processSlackAlert(af.name, hdbcons.SID, host, slackNotification.getWebhook() , current_time_to_string, slackNotification.okInfo() )
  
 	    if comman.log_features:
 		log(alert_feature_info[0], CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features), "alertFeatures")
@@ -1050,37 +1081,28 @@ def log(message, comman, file_name = "", sendEmail = False):
 #ADDED#######################################################################################################################################################
 
 #- Slack alerting integration - 
-def processSlackAlert(message, sid, hostname, webhook, alertColor):
+def processSlackAlert(alert_name, sid, hostname, webhook, date, typeInfo, next_check = None):
     #build message
-
-    #DEBUG  
-    print message
-    print len(message)
-    #END DEBUG
-
-    message_template = slackMessageTemplate.replace('<date>', message[1].strip())
-    message_template = message_template.replace('<sid>',sid)
-    message_template = message_template.replace('<hostname>',hostname)
-    message_template = message_template.replace('<color>',alertColor)
-    build_details = ""
-
-    if("CPU" in message[0]):
-        build_details_description = message[0].strip()
-        build_details = "\\nDetails: " + message[5].strip()
-    else:
-        build_details_description = message[9].strip() if len(message) > 9 else message[5].strip() + "," + message[6].strip() + "," + message[7].strip() 
-        build_details =  "\\nDetails: "+ message[5].strip() + "," + message[6].strip() + "," + message[7].strip() if len(message) > 8 else ""
     
-    message_template = message_template.replace('<prettyDescription>', build_details_description)
-    message_template = message_template.replace('<details>', build_details)
+    #typeInfo expects a list similar to this:
+    # return ["ISSUE","FF0000"]
+
+    message_template = slackMessageTemplate.replace('<date>', date)
+    message_template = message_template.replace('<timezone>', time.tzname[0])
+    message_template = message_template.replace('<sid>', sid)
+    message_template = message_template.replace('<hostname>', hostname)
+    message_template = message_template.replace('<status>', typeInfo[0])
+    message_template = message_template.replace('<color>', typeInfo[1])
+    message_template = message_template.replace('<alert>', alert_name)
+    message_template = message_template.replace('<next_check>', "\\nNext Check after: " + next_check if next_check else "")
 
     #print message_template
-
-    slack_command = "curl -X POST -H 'Content-type: application/json' --data '" +  message_template + "' " + webhook
-    print slack_command
+    # -s hides the progress meter output of curl from the output.
+    slack_command = '''curl -s -X POST -H 'Content-type: application/json' --data ' ''' +  message_template + "' " + webhook
+    #print slack_command
     command_run = subprocess.check_output(slack_command,shell=True)
-    print command_run
-    os._exit(1)
+    #print command_run
+    #os._exit(1)
 
 #- End Slack alerting integration - 
 
@@ -1256,6 +1278,7 @@ def main():
     flag_file = ""    #default: no configuration input file
     log_features = "false"
     slack_notification = None
+    slack_notification_timeout = 20 #20 seconds
     email_notification = None
     ssl = "false"
     virtual_local_host = "" #default: assume physical local host
@@ -1814,7 +1837,7 @@ def main():
     ############# EMAIL NOTIFICATION ##############
     if slack_notification:
         global slackNotification
-        slackNotification = SlackNotification(slack_notification, SID, local_host)
+        slackNotification = SlackNotification(slack_notification)
 
     ### FILL HDBCONS STRINGS ###
     hdbcons = HDBCONS(local_host, used_hosts, local_dbinstance, is_mdc, is_tenant, communicationPort, SID, rte_mode, tenantDBName)
@@ -1904,7 +1927,7 @@ def main():
                    ############################################################################
                    
 		   if (datetime.now() >= resume_alert_on and len(alert_features) > 0 ):
-		      [alert_recorded, offline] = alert(ping_timeout, alert_features, feature_check_timeout, host_mode, comman, hdbcons, alert_triggered_interval, alerts_triggered)
+		      [alert_recorded, offline] = alert(ping_timeout, alert_features, feature_check_timeout, host_mode, comman, hdbcons, alert_triggered_interval, alerts_triggered, slack_notification_timeout)
 		      resume_alert_on = datetime.now() + timedelta(seconds=float(alert_check_interval))  
 		      #log("=> Current Time: " + datetime.now().strftime("%m/%d/%Y, %H:%M:%S") + " => Resume Alert at: " + resume_alert_on.strftime("%m/%d/%Y, %H:%M:%S"), comman)
 		      #print("Alerts_Triggered: " + str(len(alerts_triggered)))
